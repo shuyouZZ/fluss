@@ -18,11 +18,10 @@
 package org.apache.fluss.lake.iceberg.tiering;
 
 import org.apache.fluss.lake.iceberg.maintenance.RewriteDataFileResult;
+import org.apache.fluss.lake.iceberg.utils.ContentFileSet;
 
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DeleteFile;
-import org.apache.iceberg.util.DataFileSet;
-import org.apache.iceberg.util.DeleteFileSet;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -33,25 +32,25 @@ public class IcebergCommittable implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final DataFileSet dataFiles;
-    private final DeleteFileSet deleteFiles;
+    private final ContentFileSet<DataFile> dataFiles;
+    private final ContentFileSet<DeleteFile> deleteFiles;
 
     private final List<RewriteDataFileResult> rewriteDataFiles;
 
     private IcebergCommittable(
-            DataFileSet dataFiles,
-            DeleteFileSet deleteFiles,
+            ContentFileSet<DataFile> dataFiles,
+            ContentFileSet<DeleteFile> deleteFiles,
             List<RewriteDataFileResult> rewriteDataFiles) {
         this.dataFiles = dataFiles;
         this.deleteFiles = deleteFiles;
         this.rewriteDataFiles = rewriteDataFiles;
     }
 
-    public DataFileSet getDataFiles() {
+    public ContentFileSet<DataFile> getDataFiles() {
         return dataFiles;
     }
 
-    public DeleteFileSet getDeleteFiles() {
+    public ContentFileSet<DeleteFile> getDeleteFiles() {
         return deleteFiles;
     }
 
@@ -68,8 +67,8 @@ public class IcebergCommittable implements Serializable {
      * entries.
      */
     public static class Builder {
-        private final DataFileSet dataFiles = DataFileSet.create();
-        private final DeleteFileSet deleteFiles = DeleteFileSet.create();
+        private final ContentFileSet<DataFile> dataFiles = ContentFileSet.create();
+        private final ContentFileSet<DeleteFile> deleteFiles = ContentFileSet.create();
 
         private final List<RewriteDataFileResult> rewriteDataFileResults = new ArrayList<>();
 

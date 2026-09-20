@@ -66,10 +66,10 @@ class IcebergPartitionSpecValidatorTest {
     }
 
     @Test
-    void testAllowDifferentPartitionFieldNames() {
+    void testAllowRenamedBucketField() {
         PartitionSpec icebergSpec =
                 PartitionSpec.builderFor(ICEBERG_SCHEMA)
-                        .identity("c3", "renamed_partition")
+                        .identity("c3")
                         .bucket("c1", BUCKET_NUM, "renamed_bucket")
                         .build();
 

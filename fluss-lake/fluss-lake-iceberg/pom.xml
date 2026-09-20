@@ -31,6 +31,16 @@
     <name>Apache Fluss : Lake : Iceberg</name>
 
     <packaging>jar</packaging>
+
+    <profiles>
+        <profile>
+            <id>internal-flink118-iceberg16</id>
+            <properties>
+                <internal.compatibility.gate.skip>false</internal.compatibility.gate.skip>
+            </properties>
+        </profile>
+    </profiles>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.iceberg</groupId>
@@ -241,6 +251,13 @@
             <artifactId>iceberg-flink-${flink.major.version}</artifactId>
             <version>${iceberg.version}</version>
             <scope>test</scope>
+            <exclusions>
+                <!-- Hive test dependencies pulled by the internal Iceberg runtime use Log4j 1. -->
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>

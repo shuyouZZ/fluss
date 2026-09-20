@@ -33,8 +33,145 @@
     <name>Apache Fluss : Flink : Tiering</name>
 
     <properties>
-        <flink.minor.version>1.20.3</flink.minor.version>
+        <flink.minor.version>${fluss.flink.tiering.version}</flink.minor.version>
     </properties>
+
+    <profiles>
+        <profile>
+            <id>internal-flink118-iceberg16</id>
+            <properties>
+                <internal.compatibility.gate.skip>false</internal.compatibility.gate.skip>
+            </properties>
+            <dependencies>
+                <!--
+                  Build the Fluss Iceberg plugin in the same reactor, then unpack its classes into
+                  the Tiering fat jar below. Keeping this dependency provided avoids placing the
+                  plugin's already-shaded Iceberg classes in the Maven runtime dependency graph.
+                -->
+                <dependency>
+                    <groupId>org.apache.fluss</groupId>
+                    <artifactId>fluss-lake-iceberg</artifactId>
+                    <version>${project.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+                <!--
+                  Tiering must carry one internally consistent Fluss/Flink 1.18 runtime closure.
+                  Excluding transitive dependencies keeps the compatibility gate focused on the
+                  connector artifact that Shade adds below.
+                -->
+                <dependency>
+                    <groupId>org.apache.fluss</groupId>
+                    <artifactId>fluss-flink-1.18</artifactId>
+                    <version>${project.version}</version>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>*</groupId>
+                            <artifactId>*</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>clean-tiering-output</id>
+                                <phase>initialize</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <delete dir="${project.build.outputDirectory}"/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>unpack-iceberg-tiering-runtime</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>unpack</goal>
+                                </goals>
+                                <configuration>
+                                    <overWriteReleases>true</overWriteReleases>
+                                    <overWriteSnapshots>true</overWriteSnapshots>
+                                    <artifactItems>
+                                        <!--
+                                          Tiering is submitted as one user jar by the internal Flink platform.
+                                          Its client-side PackagedProgram classloader therefore cannot rely on
+                                          dependencyResourcePaths or $FLINK_HOME/lib. The Fluss/Flink runtime is
+                                          shaded as one connector artifact; only the Iceberg-specific closure is
+                                          unpacked into this profile-specific artifact.
+                                        -->
+                                        <artifactItem>
+                                            <groupId>org.apache.fluss</groupId>
+                                            <artifactId>fluss-lake-iceberg</artifactId>
+                                            <version>${project.version}</version>
+                                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                                            <excludes>
+                                                org/roaringbitmap/**,
+                                                META-INF/MANIFEST.MF,
+                                                META-INF/versions/**
+                                            </excludes>
+                                        </artifactItem>
+                                        <artifactItem>
+                                            <groupId>org.apache.iceberg</groupId>
+                                            <artifactId>iceberg-flink-runtime-1.18</artifactId>
+                                            <version>${iceberg.version}</version>
+                                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                                            <includes>
+                                                org/apache/iceberg/hive/**,
+                                                org/apache/iceberg/shaded/org/apache/hadoop/hive/**,
+                                                org/apache/iceberg/shaded/org/apache/hive/**,
+                                                org/apache/hadoop/**,
+                                                org/apache/thrift/**,
+                                                com/google/common/**,
+                                                org/apache/commons/lang/**,
+                                                org/apache/commons/collections/**,
+                                                org/apache/commons/logging/**,
+                                                com/facebook/fb303/**
+                                            </includes>
+                                            <!--
+                                              hadoop-hdfs is intentionally not unpacked. The Flink deployment image
+                                              must provide its HDFS client and configuration with the same Hadoop
+                                              version as these Hadoop common classes.
+                                            -->
+                                        </artifactItem>
+                                    </artifactItems>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>shade-fluss</id>
+                                <configuration>
+                                    <artifactSet>
+                                        <includes combine.children="append">
+                                            <include>org.apache.fluss:fluss-flink-1.18</include>
+                                        </includes>
+                                    </artifactSet>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
     <dependencies>
         <dependency>
@@ -144,6 +281,13 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <artifactSet>
+                                <includes combine.children="append">
+                                    <include>org.apache.fluss:fluss-flink-common</include>
+                                    <include>org.apache.fluss:fluss-client</include>
+                                    <include>org.roaringbitmap:RoaringBitmap</include>
+                                </includes>
+                            </artifactSet>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>org.apache.fluss.flink.tiering.FlussLakeTieringEntrypoint</mainClass>

@@ -17,6 +17,8 @@
 
 package org.apache.fluss.flink.tiering;
 
+import org.apache.flink.configuration.JobManagerOptions;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,5 +72,13 @@ class FlussLakeTieringTest {
                                 TestLakeTieringDecorator2.TEST_LAKE_TIERING_CONFIG_KEY))
                 .isPresent()
                 .contains(TestLakeTieringDecorator2.TEST_LAKE_TIERING_CONFIG_VALUE);
+
+        assertThat(
+                        tiering.execEnv
+                                .getConfiguration()
+                                .get(JobManagerOptions.EXECUTION_FAILOVER_STRATEGY))
+                .isEqualTo("full");
+        assertThat(tiering.execEnv.getConfiguration().get(RestartStrategyOptions.RESTART_STRATEGY))
+                .isEqualTo("exponential-delay");
     }
 }

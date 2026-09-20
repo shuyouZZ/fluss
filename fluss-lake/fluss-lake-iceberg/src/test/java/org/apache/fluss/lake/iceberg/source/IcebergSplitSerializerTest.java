@@ -77,8 +77,8 @@ class IcebergSplitSerializerTest extends IcebergSourceTestBase {
         byte[] serialized = serializer.serialize(originalIcebergSplit);
         IcebergSplit deserialized = serializer.deserialize(serializer.getVersion(), serialized);
 
-        assertThat(deserialized.fileScanTask().file().location())
-                .isEqualTo(originalIcebergSplit.fileScanTask().file().location());
+        assertThat(deserialized.fileScanTask().file().path().toString())
+                .isEqualTo(originalIcebergSplit.fileScanTask().file().path().toString());
         assertThat(deserialized.partition()).isEqualTo(originalIcebergSplit.partition());
         assertThat(deserialized.bucket()).isEqualTo(originalIcebergSplit.bucket());
     }
@@ -125,8 +125,8 @@ class IcebergSplitSerializerTest extends IcebergSourceTestBase {
 
             assertThat(deserialized.bucket()).isEqualTo(original.bucket());
             assertThat(deserialized.partition()).isEqualTo(original.partition());
-            assertThat(deserialized.fileScanTask().file().location())
-                    .isEqualTo(original.fileScanTask().file().location());
+            assertThat(deserialized.fileScanTask().file().path().toString())
+                    .isEqualTo(original.fileScanTask().file().path().toString());
         }
     }
 

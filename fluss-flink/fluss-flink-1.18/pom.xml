@@ -33,7 +33,7 @@
 
     <properties>
         <flink.major.version>1.18</flink.major.version>
-        <flink.minor.version>1.18.1</flink.minor.version>
+        <flink.minor.version>${fluss.flink.118.version}</flink.minor.version>
     </properties>
 
     <dependencies>

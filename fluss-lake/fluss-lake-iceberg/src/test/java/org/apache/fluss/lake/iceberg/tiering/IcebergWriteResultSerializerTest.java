@@ -19,6 +19,7 @@
 package org.apache.fluss.lake.iceberg.tiering;
 
 import org.apache.fluss.lake.iceberg.maintenance.RewriteDataFileResult;
+import org.apache.fluss.lake.iceberg.utils.ContentFileSet;
 
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
@@ -30,7 +31,6 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.io.WriteResult;
 import org.apache.iceberg.types.Types;
-import org.apache.iceberg.util.DataFileSet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -81,8 +81,8 @@ class IcebergWriteResultSerializerTest {
         RewriteDataFileResult rewriteDataFileResult =
                 new RewriteDataFileResult(
                         1L,
-                        DataFileSet.of(Collections.singletonList(dataFile)),
-                        DataFileSet.of(Collections.singletonList(dataFile)));
+                        ContentFileSet.of(Collections.singletonList(dataFile)),
+                        ContentFileSet.of(Collections.singletonList(dataFile)));
         originalResult = new IcebergWriteResult(writeResult, rewriteDataFileResult);
         serializedData = serializer.serialize(originalResult);
         deserializedResult = serializer.deserialize(serializer.getVersion(), serializedData);

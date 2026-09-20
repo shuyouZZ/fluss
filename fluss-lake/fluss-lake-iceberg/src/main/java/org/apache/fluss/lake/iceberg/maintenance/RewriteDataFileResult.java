@@ -18,7 +18,9 @@
 
 package org.apache.fluss.lake.iceberg.maintenance;
 
-import org.apache.iceberg.util.DataFileSet;
+import org.apache.fluss.lake.iceberg.utils.ContentFileSet;
+
+import org.apache.iceberg.DataFile;
 
 import java.io.Serializable;
 
@@ -28,21 +30,23 @@ public class RewriteDataFileResult implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final long snapshotId;
-    private final DataFileSet deletedDataFiles;
-    private final DataFileSet addedDataFiles;
+    private final ContentFileSet<DataFile> deletedDataFiles;
+    private final ContentFileSet<DataFile> addedDataFiles;
 
     public RewriteDataFileResult(
-            long snapshotId, DataFileSet deletedDataFiles, DataFileSet addedDataFiles) {
+            long snapshotId,
+            ContentFileSet<DataFile> deletedDataFiles,
+            ContentFileSet<DataFile> addedDataFiles) {
         this.snapshotId = snapshotId;
         this.deletedDataFiles = deletedDataFiles;
         this.addedDataFiles = addedDataFiles;
     }
 
-    public DataFileSet deletedDataFiles() {
+    public ContentFileSet<DataFile> deletedDataFiles() {
         return deletedDataFiles;
     }
 
-    public DataFileSet addedDataFiles() {
+    public ContentFileSet<DataFile> addedDataFiles() {
         return addedDataFiles;
     }
 

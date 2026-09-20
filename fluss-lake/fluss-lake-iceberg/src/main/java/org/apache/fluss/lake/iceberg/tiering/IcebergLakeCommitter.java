@@ -25,7 +25,6 @@ import org.apache.fluss.metadata.TablePath;
 
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.CatalogUtil;
-import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.RewriteFiles;
@@ -176,7 +175,7 @@ public class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, I
                             .flatMap(
                                     rewriteDataFileResult ->
                                             rewriteDataFileResult.addedDataFiles().stream())
-                            .map(ContentFile::location)
+                            .map(contentFile -> contentFile.path().toString())
                             .collect(Collectors.toList());
             LOG.error(
                     "Failed to commit rewrite files to iceberg, delete rewrite added files {}.",
@@ -205,13 +204,13 @@ public class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, I
     public void abort(IcebergCommittable committable) {
         List<String> dataFilesToDelete =
                 committable.getDataFiles().stream()
-                        .map(ContentFile::location)
+                        .map(contentFile -> contentFile.path().toString())
                         .collect(Collectors.toList());
         CatalogUtil.deleteFiles(icebergTable.io(), dataFilesToDelete, "data file", true);
 
         List<String> deleteFilesToDelete =
                 committable.getDeleteFiles().stream()
-                        .map(ContentFile::location)
+                        .map(contentFile -> contentFile.path().toString())
                         .collect(Collectors.toList());
         CatalogUtil.deleteFiles(icebergTable.io(), deleteFilesToDelete, "delete file", true);
     }

@@ -21,6 +21,7 @@ package org.apache.fluss.lake.iceberg.maintenance;
 import org.apache.fluss.config.Configuration;
 import org.apache.fluss.lake.iceberg.tiering.IcebergCatalogProvider;
 import org.apache.fluss.lake.iceberg.tiering.writer.TaskWriterFactory;
+import org.apache.fluss.lake.iceberg.utils.ContentFileSet;
 import org.apache.fluss.metadata.TableBucket;
 import org.apache.fluss.metadata.TablePath;
 
@@ -41,7 +42,6 @@ import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.TaskWriter;
 import org.apache.iceberg.types.Types;
-import org.apache.iceberg.util.DataFileSet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -231,7 +231,7 @@ class IcebergRewriteTest {
 
     private static void appendTinyFilesWithRowsAndBucket(
             Table table, int files, int rowsPerFile, int baseOffset, int bucket) throws Exception {
-        DataFileSet toAppend = DataFileSet.create();
+        ContentFileSet<DataFile> toAppend = ContentFileSet.create();
         for (int i = 0; i < files; i++) {
             toAppend.add(
                     writeTinyDataFile(table, rowsPerFile, baseOffset + (i * rowsPerFile), bucket));

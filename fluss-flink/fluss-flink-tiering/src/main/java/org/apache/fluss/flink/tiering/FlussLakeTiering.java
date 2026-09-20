@@ -32,8 +32,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.ServiceLoader;
 
-import static org.apache.flink.configuration.RestartStrategyOptions.RestartStrategyType.EXPONENTIAL_DELAY;
-import static org.apache.flink.runtime.executiongraph.failover.FailoverStrategyFactoryLoader.FULL_RESTART_STRATEGY_NAME;
 import static org.apache.fluss.flink.tiering.source.TieringSourceOptions.DATA_LAKE_CONFIG_PREFIX;
 import static org.apache.fluss.utils.PropertiesUtils.extractAndRemovePrefix;
 import static org.apache.fluss.utils.PropertiesUtils.extractPrefix;
@@ -52,6 +50,8 @@ public class FlussLakeTiering {
 
     private static final String FLUSS_CONF_PREFIX = "fluss.";
     private static final String LAKE_TIERING_CONFIG_PREFIX = "lake.tiering.";
+    private static final String FULL_RESTART_STRATEGY_NAME = "full";
+    private static final String EXPONENTIAL_DELAY_RESTART_STRATEGY_NAME = "exponential-delay";
 
     protected final StreamExecutionEnvironment execEnv;
     protected final String dataLake;
@@ -104,7 +104,8 @@ public class FlussLakeTiering {
         // persisted in Fluss Server's LakeSnapshot, not in Flink checkpoint state), so it is
         // safe to restart indefinitely on failure. Without this, Flink defaults to "no-restart"
         // when checkpoint is not enabled, causing the job to fail permanently on any exception.
-        flinkConfig.set(RestartStrategyOptions.RESTART_STRATEGY, EXPONENTIAL_DELAY.getMainValue());
+        flinkConfig.set(
+                RestartStrategyOptions.RESTART_STRATEGY, EXPONENTIAL_DELAY_RESTART_STRATEGY_NAME);
 
         execEnv = StreamExecutionEnvironment.getExecutionEnvironment(flinkConfig);
     }

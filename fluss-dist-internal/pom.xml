@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Licensed to the Apache Software Foundation (ASF) under one or more
+ contributor license agreements.  See the NOTICE file distributed with
+ this work for additional information regarding copyright ownership.
+ The ASF licenses this file to You under the Apache License, Version 2.0
+ (the "License"); you may not use this file except in compliance with
+ the License.  You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.apache.fluss</groupId>
+        <artifactId>fluss</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>fluss-dist-internal</artifactId>
+    <name>Apache Fluss : Internal Iceberg Dist</name>
+    <packaging>pom</packaging>
+
+    <properties>
+        <internal.compatibility.gate.skip>false</internal.compatibility.gate.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.fluss</groupId>
+            <artifactId>fluss-dist</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.fluss</groupId>
+            <artifactId>fluss-lake-iceberg</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <artifactId>maven-assembly-plugin</artifactId>
+                    <configuration>
+                        <finalName>fluss-${project.version}-bin</finalName>
+                        <appendAssemblyId>false</appendAssemblyId>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <plugin>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>bin</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                        <configuration>
+                            <descriptors>
+                                <descriptor>src/main/assemblies/bin.xml</descriptor>
+                            </descriptors>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>tgz</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                        <configuration>
+                            <descriptors>
+                                <descriptor>src/main/assemblies/tgz.xml</descriptor>
+                            </descriptors>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>verify-iceberg-plugin-provider</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <available file="${project.build.directory}/fluss-${project.version}-bin/fluss-${project.version}/bin/coordinator-server.sh"
+                                           property="internal.base.bin.present"/>
+                                <available file="${project.build.directory}/fluss-${project.version}-bin/fluss-${project.version}/plugins/hdfs/fluss-fs-hdfs-${project.version}.jar"
+                                           property="internal.base.hdfs-plugin.present"/>
+                                <available file="${project.build.directory}/fluss-${project.version}-bin/fluss-${project.version}/plugins/paimon/fluss-lake-paimon-${project.version}.jar"
+                                           property="internal.base.paimon-plugin.present"/>
+                                <available file="${project.build.directory}/fluss-${project.version}-bin/fluss-${project.version}/plugins/jmx/fluss-metrics-jmx-${project.version}.jar"
+                                           property="internal.base.jmx-plugin.present"/>
+                                <fail unless="internal.base.bin.present"
+                                      message="The internal distribution is missing the base Fluss bin scripts."/>
+                                <fail unless="internal.base.hdfs-plugin.present"
+                                      message="The internal distribution is missing the base HDFS plugin."/>
+                                <fail unless="internal.base.paimon-plugin.present"
+                                      message="The internal distribution is missing the base Paimon plugin."/>
+                                <fail unless="internal.base.jmx-plugin.present"
+                                      message="The internal distribution is missing the base JMX plugin."/>
+                                <mkdir dir="${project.build.directory}/internal-iceberg-plugin"/>
+                                <unzip src="${project.build.directory}/fluss-${project.version}-bin/fluss-${project.version}/plugins/iceberg/fluss-lake-iceberg-${project.version}.jar"
+                                       dest="${project.build.directory}/internal-iceberg-plugin"/>
+                                <loadfile property="internal.iceberg.plugin.provider"
+                                          srcFile="${project.build.directory}/internal-iceberg-plugin/META-INF/services/org.apache.fluss.lake.lakestorage.LakeStoragePlugin"/>
+                                <condition property="internal.iceberg.plugin.provider.present">
+                                    <contains string="${internal.iceberg.plugin.provider}"
+                                              substring="org.apache.fluss.lake.iceberg.IcebergLakeStoragePlugin"/>
+                                </condition>
+                                <fail unless="internal.iceberg.plugin.provider.present"
+                                      message="The internal Iceberg plugin does not expose its LakeStoragePlugin provider."/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
