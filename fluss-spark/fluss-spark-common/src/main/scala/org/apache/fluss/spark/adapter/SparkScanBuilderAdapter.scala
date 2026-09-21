@@ -32,6 +32,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  */
 object SparkScanBuilderAdapter {
 
+  /** Creates the shared append or upsert scan builder using the default Spark APIs. */
   def newScanBuilder(
       tablePath: TablePath,
       tableInfo: TableInfo,

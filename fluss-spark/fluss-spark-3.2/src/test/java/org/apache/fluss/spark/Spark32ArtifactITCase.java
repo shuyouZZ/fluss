@@ -43,6 +43,10 @@ class Spark32ArtifactITCase {
                                     "org.apache.fluss.spark.Spark32BatchQueryTest",
                                     "-s",
                                     "org.apache.fluss.spark.Spark32MicroBatchTest",
+                                    "-s",
+                                    "org.apache.fluss.spark.SparkStreamingTest",
+                                    "-s",
+                                    "org.apache.fluss.spark.Spark32StreamingWriteTest",
                                     "-o",
                                     "-u",
                                     reports.toString()

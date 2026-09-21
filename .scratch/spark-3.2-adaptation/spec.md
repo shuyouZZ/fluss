@@ -1,6 +1,6 @@
 # Internal Spark 3.2 connector compatibility
 
-Status: ready-for-agent
+Status: resolved
 
 ## Latest scope clarification (2026-09-20)
 
@@ -65,7 +65,7 @@ The Spark 3.2 connector follows the existing Flink compatibility model. Shared c
 - Shared connector behavior is kept shared only where its compiled Spark API surface is compatible. Spark-version-sensitive code is isolated behind a small compatibility boundary rather than selected at runtime by reflection.
 - The compatibility boundary owns scan filter exchange, optional scan optimizations, and source-trigger capability declarations. Catalog, Fluss client interaction, read planning, record conversion, and write semantics stay outside that boundary unless a compile-time incompatibility proves otherwise.
 - Spark 3.2 filter handling implements the legacy DataSource V2 filter contract. It reports accepted filters separately from residual filters; residual filters remain Spark-owned.
-- Spark 3.2 does not advertise V2 Predicate support, pushed limit support, or AvailableNow trigger support. Requests relying on AvailableNow fail with an actionable unsupported-capability message rather than a missing-class error.
+- Spark 3.2 does not advertise V2 Predicate support, pushed limit support, or AvailableNow trigger support. AvailableNow is explicitly documented as unsupported: Spark 3.2 has no such Trigger/API, and the selected adapter must not link to its unavailable classes.
 - Existing Spark 3.4 and 3.5 artifact names, source behavior, packaging, and CI lanes remain unchanged.
 - The Spark 3.2 artifact follows the existing connector packaging convention: it contains the compatible connector implementation and shaded Fluss client dependencies, while Spark dependencies remain provided by the runtime.
 - The work does not change Fluss server APIs, table metadata contracts, RPC protocols, Lake integration, Flink connectors, or the default distribution.
@@ -76,7 +76,7 @@ The Spark 3.2 connector follows the existing Flink compatibility model. Shared c
 - The primary acceptance seam is a Spark 3.2 session using the packaged connector JAR against a Fluss test cluster. It verifies catalog initialization, SQL DDL, batch read, batch write, micro-batch read, and streaming write behavior.
 - Filter tests assert returned rows and whether a supported legacy filter is accepted; they do not assert Spark internal Predicate classes or Catalyst plan extractor arity.
 - Limit tests prove correct result cardinality with connector-side limit pushdown disabled.
-- Streaming tests cover ordinary micro-batch checkpoint and restart behavior. AvailableNow has a dedicated negative test that proves a clear unsupported response.
+- Streaming tests cover ordinary micro-batch checkpoint and restart behavior. Artifact checks reject AvailableNow API references in selected adapters, and usage documentation explicitly excludes this trigger.
 - Adapter compilation resolves Spark 3.2 / Scala 2.12 APIs. Packaging and runtime checks verify the selected adapter classes do not reference unavailable APIs; unused default-only common helpers are not mistaken for the selected adapter implementation.
 - The existing 3.4 and 3.5 test suites remain regression gates. Their tests continue to cover the higher-version V2 Predicate and optimization behavior.
 - Packaging verification confirms that the Spark 3.2 artifact includes the intended Fluss classes and client payload while excluding Spark runtime classes.
@@ -96,5 +96,10 @@ The Spark 3.2 connector follows the existing Flink compatibility model. Shared c
 - Repository evidence shows that the existing connector source imports newer V2 Predicate and filter-pushdown interfaces, while the locally available internal Spark 3.2 build exposes the legacy filter contract. This is the motivating compatibility split.
 - The current shared Spark test suite also relies on Catalyst plan details that differ in Spark 3.2; the Spark 3.2 line needs its own behavior-oriented tests rather than copied internal-plan assertions.
 - The adapter artifact must establish an explicit Spark 3.2 compilation and packaging gate before functional qualification. Compatible common bytecode is reused; selected adapters and runtime dependencies are verified against Spark 3.2.
-- Tickets 01 through 04 are superseded by the adapter-seam design and retained only as history. Tickets 05 through 09 are the active implementation sequence.
-- Ticket 10 separately qualifies streaming writes because Spark 3.2 lacks the newer streaming-write coordinator API used by the shared implementation.
+- Tickets 01 through 04 are superseded by the adapter-seam design and retained only as history. Tickets 05 through 10 are the active implementation scope; release qualification (09) follows streaming writes (10).
+- Ticket 10 separately qualifies streaming writes. Spark 3.2/3.4 lack the newer coordinator hook but safely ignore Fluss's extra method; preserve their native coordinator policy and reuse shared writers unless an actual incompatible invocation requires adaptation.
+
+## Capability comparison
+
+See [Spark 3.2 versus main](compatibility-matrix.md) for the pinned baseline, support matrix,
+optimization limits, streaming commit semantics, and internal CI/reproduction instructions.

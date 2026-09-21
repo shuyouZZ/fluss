@@ -36,6 +36,7 @@ import scala.collection.JavaConverters._
 /** Spark 3.2 scan-builder entry point using Spark's legacy filter contract. */
 object SparkScanBuilderAdapter {
 
+  /** Creates a legacy-filter scan builder while reusing shared Fluss batch and stream readers. */
   def newScanBuilder(
       tablePath: TablePath,
       tableInfo: TableInfo,

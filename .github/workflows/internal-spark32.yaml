@@ -1,0 +1,84 @@
+################################################################################
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+name: Internal Spark 3.2 qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - release-**
+      - ci-**
+    paths:
+      - 'fluss-*/**'
+      - 'pom.xml'
+      - '.mvn/**'
+      - '.github/workflows/internal-spark32.yaml'
+      - 'tools/ci/check-spark32-dependencies*.py'
+  pull_request:
+    paths:
+      - 'fluss-*/**'
+      - 'pom.xml'
+      - '.mvn/**'
+      - '.github/workflows/internal-spark32.yaml'
+      - 'tools/ci/check-spark32-dependencies*.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  spark32:
+    name: Apache Spark 3.2.4 / Scala 2.12
+    runs-on: self-hosted
+    timeout-minutes: 90
+    env:
+      MAVEN_OPTS: -Xmx4096m
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Set up JDK 11
+        uses: actions/setup-java@v5
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+      - name: Test dependency qualification checker
+        run: python3 tools/ci/check-spark32-dependencies_test.py
+      - name: Build connector and upstream test JARs
+        run: |
+          mvn -B -Pinternal-spark-3.2 -pl fluss-spark/fluss-spark-3.2 -am clean install -DskipTests
+      - name: Check resolved Spark and Scala test dependencies
+        run: |
+          mvn -B -Pinternal-spark-3.2 -pl fluss-spark/fluss-spark-3.2 dependency:list -DincludeScope=test -DincludeGroupIds=org.apache.spark,org.scala-lang,org.scala-lang.modules -DoutputFile=${{ runner.temp }}/spark32-dependencies.txt -DappendOutput=false
+          python3 tools/ci/check-spark32-dependencies.py ${{ runner.temp }}/spark32-dependencies.txt
+      - name: Test and verify the packaged connector
+        run: |
+          mvn -B -Pinternal-spark-3.2 -pl fluss-spark/fluss-spark-3.2 clean verify -Dlog.dir=${{ runner.temp }}/fluss-logs -Dlog4j.configurationFile=${{ github.workspace }}/tools/ci/log4j.properties
+      - name: Upload qualification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: internal-spark32-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/spark32-dependencies.txt
+            ${{ runner.temp }}/fluss-logs/
+            fluss-spark/fluss-spark-3.2/target/surefire-reports/
+            fluss-spark/fluss-spark-3.2/target/artifact-test-reports/

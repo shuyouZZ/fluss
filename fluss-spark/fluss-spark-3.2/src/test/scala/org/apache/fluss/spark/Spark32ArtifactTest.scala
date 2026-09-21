@@ -19,6 +19,7 @@ package org.apache.fluss.spark
 
 import org.apache.fluss.client.ConnectionFactory
 import org.apache.fluss.spark.adapter.{SparkMicroBatchStreamAdapter, SparkNamespaceAdapter, SparkScanBuilderAdapter, SparkSqlAdapter}
+import org.apache.fluss.spark.write.{FlussAppendStreamingWrite, FlussStreamingWrite, FlussUpsertStreamingWrite}
 
 import org.assertj.core.api.Assertions.assertThat
 import org.scalatest.funsuite.AnyFunSuite
@@ -43,6 +44,9 @@ class Spark32ArtifactTest extends AnyFunSuite {
     Seq(
       classOf[SparkCatalog],
       classOf[ConnectionFactory],
+      classOf[FlussStreamingWrite],
+      classOf[FlussAppendStreamingWrite],
+      classOf[FlussUpsertStreamingWrite],
       classOf[SparkMicroBatchStreamAdapter],
       classOf[SparkNamespaceAdapter],
       SparkScanBuilderAdapter.getClass,

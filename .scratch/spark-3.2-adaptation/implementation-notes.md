@@ -1,4 +1,4 @@
-# Spark 3.2 tickets 05–08
+# Spark 3.2 tickets 05–10
 
 ## Final implementation boundary
 
@@ -43,19 +43,19 @@ RocksDB JNI, preserving the previous test-module classpath order. The unchanged 
 the upstream StreamTest test-library ABI differs. Catalog and TVF cases use small subclasses
 with release-specific expectations; default Spark 3.4/3.5 coverage remains unchanged.
 
-- `test`: runs 171 ScalaTest cases, including shared behavior and adapter contracts.
+- `test`: runs 167 ScalaTest cases, including shared behavior, writer failure contracts and adapter contracts.
 - `package`: assembles the shaded connector JAR.
 - `integration-test`: the existing Surefire execution runs the JUnit5 Spark32ArtifactITCase
-  bridge, which executes 7 ScalaTest acceptance cases (artifact selection, batch queries and
-  checkpoint recovery). Its main classpath entry is the final JAR, and separate common/client
+  bridge, which executes 15 ScalaTest acceptance cases (artifact selection, batch queries,
+  checkpoint recovery, shared streaming reads/writes and writer commit/abort lifecycle). Its main classpath entry is the final JAR, and separate common/client
   JARs are excluded. Class-origin assertions prove that the catalog, client and all selected
-  adapters came from the exact artifact built in this invocation.
+  adapters and streaming writers came from the exact artifact built in this invocation.
 - `verify`: succeeds only after the preceding acceptance execution succeeds. Failures in the
   bridge propagate to Maven; no failure-ignore option is used.
 
 Unit and artifact reports are separate (`target/surefire-reports` and
 `target/artifact-test-reports`). Acceptance cases are excluded from the ordinary ScalaTest suite
-list, so moving them after package does not duplicate the 178-case behavior coverage. The Java JUnit
+list, so moving them after package does not duplicate the 182-case behavior coverage. The Java JUnit
 bridge method is a wrapper, not an additional connector behavior case. All acceptance suites
 run in one ScalaTest Runner invocation. Surefire uses the classpath rather than the module path
 because shared and version-specific test classes use the same packages.
@@ -68,7 +68,7 @@ on 3.2, which lacks those capabilities. Dedicated SQL tests retain result-correc
 Use JDK 11 from the repository root. If shared artifacts are not installed yet:
 
 ```bash
-mvn -pl fluss-spark/fluss-spark-common,fluss-spark/fluss-spark-ut install -DskipTests
+mvn -Pinternal-spark-3.2 -pl fluss-spark/fluss-spark-3.2 -am clean install -DskipTests
 ```
 
 Then run the Spark 3.2 module directly:
@@ -84,7 +84,7 @@ with `-pl` to limit the selected modules; the profile alone does not disable oth
 The `suites` property can select an ordinary ScalaTest suite for targeted runs; packaged checks
 remain in the integration-test execution.
 
-## Verification
+## Earlier verification for tickets 05–08
 
 | Runtime | Result | Evidence |
 | --- | --- | --- |
@@ -117,5 +117,56 @@ Spark 3.2 still emits the existing ANTLR generator/runtime version notice when r
 common parser; its shared parser/procedure tests pass.
 
 Spark 3.2 cannot represent Fluss local TIMESTAMP columns; use TIMESTAMP_LTZ or a newer Spark
-runtime. AvailableNow is absent from Spark 3.2; use ProcessingTime or Once. Full streaming-write
-qualification remains ticket 10.
+runtime. AvailableNow is absent from Spark 3.2. ProcessingTime is covered by runtime tests;
+Once is a native Spark 3.2 alternative but has no separate qualification claim here.
+
+## Tickets 10 and 09
+
+Streaming writes reuse the shared implementation. Spark 3.2/3.4 ignore the additional coordinator
+method and use BatchWrite's default policy; Spark 3.5 invokes Fluss's override. No empty adapter
+was added. The shared asynchronous failure regression first failed, then passed after initializing
+FlussDataWriter's optional failure state to None. Success/failed flush contracts are shared tests;
+real append/upsert commit, abort and reopened writer behavior are checked against the final JAR.
+
+The standalone internal-spark32 workflow builds upstream test JARs, validates the resolved
+Spark/Scala closure, and runs clean verify on relevant PR/push events or manual dispatch. It
+does not alter the public 3.4/3.5 matrix. The dependency checker has seven maintained positive
+and negative tests. Remote Actions execution is distinct from local validation and has not
+been triggered by this task.
+
+See [the main-branch comparison](compatibility-matrix.md) for runtime constraints, supported
+capabilities, reduced optimizations, unqualified integrations and exact commit semantics.
+
+
+### Final qualification on 2026-09-21
+
+| Check | Result |
+| --- | --- |
+| CI-equivalent `-am clean install -DskipTests` | All 21 reactor modules passed from rebuilt sources |
+| Actual test dependency closure | Spark 3.2.4 / Scala 2.12.18; no mixed Spark/Scala line |
+| Full Spark 3.2 `clean verify` | **182/182** behavior cases in one invocation: 167 ordinary + 15 packaged; zero failed, canceled, ignored or pending |
+| Artifact bridge | One JUnit wrapper passed; not counted as an extra behavior case |
+| Shared writer contract on Spark 3.4 | 2/2 passed |
+| Shared writer contract on Spark 3.5 | 2/2 passed |
+| Dependency checker tests | 7/7 passed, including mixed-version, missing-JAR and empty-report rejection |
+| Standards / spec review | No remaining findings; method documentation finding corrected |
+| Style / license / dependency validation | Checkstyle, Spotless, RAT and Enforcer passed without skip flags in the final build/verify |
+
+The full Spark 3.2 invocation completed in 25 minutes 10 seconds. Its packaged cases comprise
+artifact isolation (1), batch behavior (4), checkpoint read recovery (2), shared streaming
+read/write behavior (6) and writer lifecycle (2). Final commands:
+
+```bash
+mvn -B -Pinternal-spark-3.2 -pl fluss-spark/fluss-spark-3.2 -am clean install -DskipTests
+mvn -B -Pinternal-spark-3.2 -pl fluss-spark/fluss-spark-3.2 dependency:list -DincludeScope=test -DincludeGroupIds=org.apache.spark,org.scala-lang,org.scala-lang.modules -DoutputFile=/tmp/spark32-dependencies.txt -DappendOutput=false
+python3 tools/ci/check-spark32-dependencies.py /tmp/spark32-dependencies.txt
+python3 tools/ci/check-spark32-dependencies_test.py
+mvn -B -Pinternal-spark-3.2 -pl fluss-spark/fluss-spark-3.2 clean verify
+mvn -B -pl fluss-spark/fluss-spark-3.4 test -Dsuites=org.apache.fluss.spark.write.FlussDataWriterTest
+mvn -B -pl fluss-spark/fluss-spark-3.5 test -Dsuites=org.apache.fluss.spark.write.FlussDataWriterTest
+```
+
+Both active tickets 10 and 09 are resolved. GitHub Actions itself was not remotely executed;
+its equivalent build and test sequence was verified locally. No publishing or deployment was
+performed. The inherited ANTLR generator/runtime notice remains; parser/SQL and runtime tests
+passed with it.
