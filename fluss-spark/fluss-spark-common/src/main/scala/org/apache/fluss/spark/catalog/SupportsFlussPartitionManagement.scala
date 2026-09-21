@@ -18,12 +18,12 @@
 package org.apache.fluss.spark.catalog
 
 import org.apache.fluss.metadata.PartitionSpec
+import org.apache.fluss.spark.adapter.SparkSqlAdapter
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{GenericInternalRow, SpecificInternalRow}
-import org.apache.spark.sql.catalyst.types._
 import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{BooleanType, CharType, DateType, DayTimeIntervalType, DoubleType, FloatType, IntegerType, LongType, ShortType, StringType, StructType, TimestampType, VarcharType, YearMonthIntervalType}
 import org.apache.spark.unsafe.types.UTF8String
 
 import java.util
@@ -98,17 +98,20 @@ object SupportsFlussPartitionManagement {
     for ((field, i) <- partitionSchema.fields.zipWithIndex) {
       val partValue = partitionSpec.getSpecMap.get(field.name)
       val value = field.dataType match {
-        case dt =>
-          // TODO Support more types when needed.
-          PhysicalDataType(field.dataType) match {
-            case PhysicalBooleanType => partValue.toBoolean
-            case PhysicalIntegerType => partValue.toInt
-            case PhysicalDoubleType => partValue.toDouble
-            case PhysicalFloatType => partValue.toFloat
-            case PhysicalLongType => partValue.toLong
-            case PhysicalShortType => partValue.toShort
-            case PhysicalStringType => UTF8String.fromString(partValue)
-          }
+        case BooleanType => partValue.toBoolean
+        case IntegerType | DateType => partValue.toInt
+        case _: YearMonthIntervalType => partValue.toInt
+        case DoubleType => partValue.toDouble
+        case FloatType => partValue.toFloat
+        case LongType | TimestampType => partValue.toLong
+        case _: DayTimeIntervalType => partValue.toLong
+        case timestamp if SparkSqlAdapter.isTimestampWithoutTimeZone(timestamp) =>
+          partValue.toLong
+        case ShortType => partValue.toShort
+        case StringType | _: CharType | _: VarcharType => UTF8String.fromString(partValue)
+        case dataType =>
+          throw new UnsupportedOperationException(
+            s"Partition data type ${dataType.catalogString} is not supported")
       }
       row.update(i, value)
     }

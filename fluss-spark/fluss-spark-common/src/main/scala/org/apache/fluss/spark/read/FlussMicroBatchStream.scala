@@ -23,11 +23,12 @@ import org.apache.fluss.client.initializer.{BucketOffsetsRetrieverImpl, OffsetsI
 import org.apache.fluss.config.Configuration
 import org.apache.fluss.exception.FlussRuntimeException
 import org.apache.fluss.metadata.{PartitionInfo, TableBucket, TableInfo, TablePath}
+import org.apache.fluss.spark.adapter.SparkMicroBatchStreamAdapter
 import org.apache.fluss.utils.json.TableBucketOffsets
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReaderFactory}
-import org.apache.spark.sql.connector.read.streaming._
+import org.apache.spark.sql.connector.read.streaming.{Offset, ReportsSourceMetrics}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -47,9 +48,8 @@ abstract class FlussMicroBatchStream(
     options: CaseInsensitiveStringMap,
     flussConfig: Configuration,
     checkpointLocation: String)
-  extends SupportsTriggerAvailableNow
+  extends SparkMicroBatchStreamAdapter
   with ReportsSourceMetrics
-  with MicroBatchStream
   with Logging
   with AutoCloseable {
 
@@ -77,8 +77,6 @@ abstract class FlussMicroBatchStream(
     infos
   }
 
-  private var allDataForTriggerAvailableNow: Option[TableBucketOffsets] = None
-
   val startOffsetsInitializer: OffsetsInitializer =
     FlussOffsetInitializers.startOffsetsInitializer(options, flussConfig)
 
@@ -97,35 +95,13 @@ abstract class FlussMicroBatchStream(
     }
   }
 
-  override def latestOffset(): Offset = {
-    throw new UnsupportedOperationException(
-      "latestOffset(Offset, ReadLimit) should be called instead of this method")
-  }
-
-  override def getDefaultReadLimit: ReadLimit = {
-    ReadLimit.allAvailable()
+  override protected def currentEndOffset(): Offset = {
+    FlussSourceOffset(fetchLatestOffsets().get)
   }
 
   override def initialOffset(): Offset = {
     val initialTableBucketOffsets = getOrCreateInitialPartitionOffsets()
     FlussSourceOffset(initialTableBucketOffsets)
-  }
-
-  override def latestOffset(start: Offset, readLimit: ReadLimit): Offset = {
-    if (!readLimit.isInstanceOf[ReadAllAvailable]) {
-      throw new UnsupportedOperationException(s"Only ReadAllAvailable is supported, but $readLimit")
-    }
-
-    val latestTableBucketOffsets = if (allDataForTriggerAvailableNow.isDefined) {
-      allDataForTriggerAvailableNow.get
-    } else {
-      fetchLatestOffsets().get
-    }
-    FlussSourceOffset(latestTableBucketOffsets)
-  }
-
-  override def prepareForTriggerAvailableNow(): Unit = {
-    allDataForTriggerAvailableNow = fetchLatestOffsets()
   }
 
   private def fetchLatestOffsets(): Option[TableBucketOffsets] = {

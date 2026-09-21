@@ -338,4 +338,13 @@
         </plugins>
     </build>
 
+    <profiles>
+        <profile>
+            <id>internal-spark-3.2</id>
+            <modules>
+                <module>fluss-spark-3.2</module>
+            </modules>
+        </profile>
+    </profiles>
+
 </project>

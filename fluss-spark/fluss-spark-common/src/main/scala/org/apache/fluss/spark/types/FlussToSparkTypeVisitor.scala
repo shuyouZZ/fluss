@@ -17,6 +17,7 @@
 
 package org.apache.fluss.spark.types
 
+import org.apache.fluss.spark.adapter.SparkSqlAdapter
 import org.apache.fluss.types._
 
 import org.apache.spark.sql.types.{DataType => SparkDataType, DataTypes => SparkDataTypes}
@@ -82,7 +83,7 @@ object FlussToSparkTypeVisitor extends DataTypeVisitor[SparkDataType] {
   }
 
   override def visit(timestampType: TimestampType): SparkDataType = {
-    SparkDataTypes.TimestampNTZType
+    SparkSqlAdapter.timestampWithoutTimeZone
   }
 
   override def visit(localZonedTimestampType: LocalZonedTimestampType): SparkDataType = {

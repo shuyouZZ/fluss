@@ -46,7 +46,7 @@ class SparkWriteTest extends FlussSparkTestBase {
                  |  true, 1, 10, 100, 1000L, 12.3F, 45.6D,
                  |  1234567.89, 12345678900987654321.12,
                  |  "test",
-                 |  TO_TIMESTAMP('2025-12-31 10:00:00', 'yyyy-MM-dd kk:mm:ss'),
+                 |  TIMESTAMP '2025-12-31 10:00:00',
                  |  array(11.11F, 22.22F),
                  |  map("k1", 111, "k2", 222),
                  |  struct(123L, "apache fluss")

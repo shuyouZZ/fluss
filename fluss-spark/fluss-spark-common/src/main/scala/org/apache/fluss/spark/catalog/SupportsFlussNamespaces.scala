@@ -19,17 +19,18 @@ package org.apache.fluss.spark.catalog
 
 import org.apache.fluss.exception.DatabaseNotExistException
 import org.apache.fluss.metadata.DatabaseDescriptor
+import org.apache.fluss.spark.adapter.SparkNamespaceAdapter
 import org.apache.fluss.utils.Preconditions
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException
-import org.apache.spark.sql.connector.catalog.{NamespaceChange, SupportsNamespaces}
+import org.apache.spark.sql.connector.catalog.NamespaceChange
 
 import java.util
 import java.util.concurrent.ExecutionException
 
 import scala.collection.JavaConverters._
 
-trait SupportsFlussNamespaces extends SupportsNamespaces with WithFlussAdmin {
+trait SupportsFlussNamespaces extends SparkNamespaceAdapter with WithFlussAdmin {
 
   override def listNamespaces(): Array[Array[String]] = {
     admin.listDatabases.get.asScala.map(Array(_)).toArray
@@ -42,7 +43,7 @@ trait SupportsFlussNamespaces extends SupportsNamespaces with WithFlussAdmin {
 
     doNamespaceOperator(namespace) {
       val dbname = admin.getDatabaseInfo(namespace.head).get().getDatabaseName
-      Array(Array(dbname))
+      namespaceChildren(dbname)
     }
   }
 
@@ -70,7 +71,7 @@ trait SupportsFlussNamespaces extends SupportsNamespaces with WithFlussAdmin {
     new UnsupportedOperationException("Altering namespace is not supported now.")
   }
 
-  override def dropNamespace(namespace: Array[String], cascade: Boolean): Boolean = {
+  override protected def dropFlussNamespace(namespace: Array[String], cascade: Boolean): Boolean = {
     doNamespaceOperator(namespace) {
       admin.dropDatabase(namespace.head, false, cascade).get()
       true

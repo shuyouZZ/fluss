@@ -61,7 +61,8 @@ case class FlussProcedureResolver(sparkSession: SparkSession) extends Rule[Logic
               s"Cannot cast $argumentType to $parameterType of ${parameter.name}.")
           }
           if (parameterType != argumentType) {
-            Cast(argument, parameterType)
+            // This constructor is binary-compatible across supported Spark versions.
+            new Cast(argument, parameterType, None)
           } else {
             argument
           }

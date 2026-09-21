@@ -36,6 +36,28 @@ class SparkCatalogTest extends FlussSparkTestBase {
 
   protected def lakeFormat: Option[DataLakeFormat] = None
 
+  /** Expected namespace description rendered by the Spark release. */
+  protected def expectedNamespaceDescription: Seq[Row] =
+    Seq(
+      Row("Catalog Name", "fluss_catalog"),
+      Row("Namespace Name", "testdb"),
+      Row("Comment", "created by spark"))
+
+  /** Expected description of the non-partitioned test table. */
+  protected def expectedBasicTableDescription: Seq[Row] =
+    Seq(Row("id", "int", null), Row("name", "string", null))
+
+  /** Expected description of the partitioned table created through the Fluss admin API. */
+  protected def expectedPartitionedTableDescription: Seq[Row] =
+    Seq(
+      Row("id", "int", null),
+      Row("name", "string", null),
+      Row("pt", "string", null),
+      Row("# Partition Information", "", ""),
+      Row("# col_name", "data_type", "comment"),
+      Row("pt", "string", null)
+    )
+
   test("Catalog: namespaces") {
     // Always a default database 'fluss'.
     checkAnswer(sql("SHOW DATABASES"), Row(DEFAULT_DATABASE) :: Nil)
@@ -45,9 +67,7 @@ class SparkCatalogTest extends FlussSparkTestBase {
 
     checkAnswer(
       sql("DESC DATABASE testdb").filter("info_name != 'Owner'"),
-      Row("Catalog Name", "fluss_catalog") :: Row("Namespace Name", "testdb") :: Row(
-        "Comment",
-        "created by spark") :: Nil
+      expectedNamespaceDescription
     )
 
     sql("DROP DATABASE testdb")
@@ -57,7 +77,7 @@ class SparkCatalogTest extends FlussSparkTestBase {
   test("Catalog: basic table") {
     sql(s"CREATE TABLE $DEFAULT_DATABASE.test_tbl (id int, name string) COMMENT 'my test table'")
     checkAnswer(sql("SHOW TABLES"), Row(DEFAULT_DATABASE, "test_tbl", false) :: Nil)
-    checkAnswer(sql("DESC test_tbl"), Row("id", "int", null) :: Row("name", "string", null) :: Nil)
+    checkAnswer(sql("DESC test_tbl"), expectedBasicTableDescription)
 
     val testTable = admin.getTableInfo(TablePath.of(DEFAULT_DATABASE, "test_tbl")).get()
     assertThat(testTable.getTablePath.getTableName).isEqualTo("test_tbl")
@@ -179,17 +199,9 @@ class SparkCatalogTest extends FlussSparkTestBase {
     admin.createTable(tablePath, tableDesc, false).get()
     assert(
       catalog.tableExists(Identifier.of(Array(tablePath.getDatabaseName), tablePath.getTableName)))
-    val expectDescTable = Seq(
-      Row("id", "int", null),
-      Row("name", "string", null),
-      Row("pt", "string", null),
-      Row("# Partition Information", "", ""),
-      Row("# col_name", "data_type", "comment"),
-      Row("pt", "string", null)
-    )
     checkAnswer(
       sql(s"DESC $dbName.$tblName"),
-      expectDescTable
+      expectedPartitionedTableDescription
     )
 
     admin.dropTable(tablePath, true).get()

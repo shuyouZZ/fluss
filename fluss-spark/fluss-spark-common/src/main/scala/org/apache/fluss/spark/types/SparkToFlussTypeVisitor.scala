@@ -17,6 +17,7 @@
 
 package org.apache.fluss.spark.types
 
+import org.apache.fluss.spark.adapter.SparkSqlAdapter
 import org.apache.fluss.types.{ArrayType => FlussArrayType, DataField => FlussDataField, DataType => FlussDataType, MapType => FlussMapType, _}
 
 import org.apache.spark.sql.types.{ArrayType => SparkArrayType, DataType => SparkDataType, MapType => SparkMapType, StructType, UserDefinedType}
@@ -88,7 +89,7 @@ object SparkToFlussTypeVisitor {
       case _: org.apache.spark.sql.types.TimestampType =>
         // spark only support 6 digits of precision
         new LocalZonedTimestampType(6)
-      case _: org.apache.spark.sql.types.TimestampNTZType =>
+      case timestamp if SparkSqlAdapter.isTimestampWithoutTimeZone(timestamp) =>
         // spark only support 6 digits of precision
         new TimestampType(6)
       case _ =>

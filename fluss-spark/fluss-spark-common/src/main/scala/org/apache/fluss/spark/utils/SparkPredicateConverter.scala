@@ -28,7 +28,7 @@ import org.apache.spark.unsafe.types.UTF8String
 
 import java.lang.{Boolean => JBoolean, Byte => JByte, Double => JDouble, Float => JFloat, Long => JLong, Short => JShort}
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 
 /**
  * Unsupported predicates yield `None`; callers must re-apply all — Fluss pushdown is batch-level,

@@ -28,6 +28,8 @@ import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2ScanRelation}
 import org.assertj.core.api.Assertions.assertThat
 
+import java.util.UUID
+
 import scala.collection.JavaConverters._
 
 /** This test case is used to verify the correctness of primary key table read. */
@@ -239,15 +241,20 @@ class SparkPrimaryKeyTableReadTest extends FlussSparkTestBase {
   }
 
   test("Spark Read: primary key table with random project") {
-    withTable("t") {
+    withTable("t_pk_projection") {
       sql(
-        "CREATE TABLE t (id int, name string, pk int, pk2 string) TBLPROPERTIES('primary.key'='pk,pk2')")
-      checkAnswer(sql("SELECT * FROM t"), Nil)
-      sql("INSERT INTO t VALUES (1, 'a', 10, 'x'), (2, 'b', 20, 'y')")
+        "CREATE TABLE t_pk_projection (id int, name string, pk int, pk2 string) TBLPROPERTIES('primary.key'='pk,pk2')")
+      // DDL metadata is visible before the tablet replicas are ready for an empty-table scan.
+      flussServer.waitUntilTableReady(
+        admin.getTableInfo(createTablePath("t_pk_projection")).get().getTableId)
+      checkAnswer(sql("SELECT * FROM t_pk_projection"), Nil)
+      sql("INSERT INTO t_pk_projection VALUES (1, 'a', 10, 'x'), (2, 'b', 20, 'y')")
       checkAnswer(
-        sql("SELECT * FROM t ORDER BY id"),
+        sql("SELECT * FROM t_pk_projection ORDER BY id"),
         Row(1, "a", 10, "x") :: Row(2, "b", 20, "y") :: Nil)
-      checkAnswer(sql("SELECT pk, id FROM t ORDER BY id"), Row(10, 1) :: Row(20, 2) :: Nil)
+      checkAnswer(
+        sql("SELECT pk, id FROM t_pk_projection ORDER BY id"),
+        Row(10, 1) :: Row(20, 2) :: Nil)
     }
   }
 
@@ -375,141 +382,156 @@ class SparkPrimaryKeyTableReadTest extends FlussSparkTestBase {
 
   test("Spark Read: partition pushdown — equality on partition key (PK table)") {
     withPkPartitionedTable {
-      val query =
-        sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE dt = '2026-01-01' ORDER BY orderId")
-      checkAnswer(
-        query,
-        Row(600L, 21L, 601, "addr1", "2026-01-01") ::
-          Row(700L, 22L, 602, "addr2", "2026-01-01") :: Nil)
-      assert(partitionPredicate(query).isDefined)
+      tableName =>
+        val query =
+          sql(
+            s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE dt = '2026-01-01' ORDER BY orderId")
+        checkAnswer(
+          query,
+          Row(600L, 21L, 601, "addr1", "2026-01-01") ::
+            Row(700L, 22L, 602, "addr2", "2026-01-01") :: Nil)
+        assert(partitionPredicate(query).isDefined)
     }
   }
 
   test("Spark Read: partition pushdown — IN on partition key (PK table)") {
     withPkPartitionedTable {
-      val query = sql(s"""
-                         |SELECT orderId, dt FROM $DEFAULT_DATABASE.t
-                         |WHERE dt IN ('2026-01-01', '2026-01-03') ORDER BY orderId""".stripMargin)
-      checkAnswer(
-        query,
-        Row(600L, "2026-01-01") ::
-          Row(700L, "2026-01-01") ::
-          Row(1000L, "2026-01-03") :: Nil)
-      assert(partitionPredicate(query).isDefined)
+      tableName =>
+        val query = sql(s"""
+                           |SELECT orderId, dt FROM $DEFAULT_DATABASE.$tableName
+                           |WHERE dt IN ('2026-01-01', '2026-01-03') ORDER BY orderId""".stripMargin)
+        checkAnswer(
+          query,
+          Row(600L, "2026-01-01") ::
+            Row(700L, "2026-01-01") ::
+            Row(1000L, "2026-01-03") :: Nil)
+        assert(partitionPredicate(query).isDefined)
     }
   }
 
   test("Spark Read: partition pushdown — non-matching partition prunes to empty (PK table)") {
     withPkPartitionedTable {
-      val query = sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE dt = '2099-01-01'")
-      checkAnswer(query, Nil)
-      assert(partitionPredicate(query).isDefined)
+      tableName =>
+        val query = sql(s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE dt = '2099-01-01'")
+        checkAnswer(query, Nil)
+        assert(partitionPredicate(query).isDefined)
     }
   }
 
   test("Spark Read: partition pushdown — predicate on non-partition column not extracted") {
     withPkPartitionedTable {
-      val query = sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE amount = 603 ORDER BY orderId")
-      checkAnswer(query, Row(800L, 23L, 603, "addr3", "2026-01-02") :: Nil)
-      // amount is not a partition key — no partition predicate extracted.
-      assert(partitionPredicate(query).isEmpty)
+      tableName =>
+        val query =
+          sql(s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE amount = 603 ORDER BY orderId")
+        checkAnswer(query, Row(800L, 23L, 603, "addr3", "2026-01-02") :: Nil)
+        // amount is not a partition key — no partition predicate extracted.
+        assert(partitionPredicate(query).isEmpty)
     }
   }
 
   test("Spark Read: scan description surfaces partition filter when pushed (PK table)") {
     withPkPartitionedTable {
-      val withPart = sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE dt = '2026-01-01'")
-      val noPart = sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE amount = 603")
-      val withDesc = flussUpsertScan(withPart).get.description()
-      val noDesc = flussUpsertScan(noPart).get.description()
-      assert(withDesc.contains("[PartitionFilter:"))
-      assert(withDesc.contains("dt"))
-      assert(!noDesc.contains("PartitionFilter"))
+      tableName =>
+        val withPart = sql(s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE dt = '2026-01-01'")
+        val noPart = sql(s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE amount = 603")
+        val withDesc = flussUpsertScan(withPart).get.description()
+        val noDesc = flussUpsertScan(noPart).get.description()
+        assert(withDesc.contains("[PartitionFilter:"))
+        assert(withDesc.contains("dt"))
+        assert(!noDesc.contains("PartitionFilter"))
     }
   }
 
   test("Spark Read: mixed partition and non-partition filter (PK table)") {
     withPkPartitionedTable {
-      val query = sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE dt = '2026-01-01' AND amount > 601")
-      checkAnswer(query, Row(700L, 22L, 602, "addr2", "2026-01-01") :: Nil)
-      // Partition predicate extracted for partition pruning
-      assert(partitionPredicate(query).isDefined)
-      // Non-partition predicate (amount > 601) remains as a Filter node in the plan
-      val executedPlan = query.queryExecution.executedPlan match {
-        case aqe: AdaptiveSparkPlanExec => aqe.executedPlan
-        case e: SparkPlan => e
-      }
-      assert(
-        executedPlan.exists(_.isInstanceOf[FilterExec]),
-        s"Expected Filter node in plan for non-partition predicate, got: $executedPlan")
+      tableName =>
+        val query = sql(
+          s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE dt = '2026-01-01' AND amount > 601")
+        checkAnswer(query, Row(700L, 22L, 602, "addr2", "2026-01-01") :: Nil)
+        // Partition predicate extracted for partition pruning
+        assert(partitionPredicate(query).isDefined)
+        // Non-partition predicate (amount > 601) remains as a Filter node in the plan
+        val executedPlan = query.queryExecution.executedPlan match {
+          case aqe: AdaptiveSparkPlanExec => aqe.executedPlan
+          case e: SparkPlan => e
+        }
+        assert(
+          executedPlan.exists(_.isInstanceOf[FilterExec]),
+          s"Expected Filter node in plan for non-partition predicate, got: $executedPlan")
 
-      val numRowsRead = executedPlan
-        .collectFirst { case b: BatchScanExec => b.metrics(FlussMetrics.NUM_ROWS_READ).value }
-        .getOrElse(0L)
-      assert(numRowsRead == 2L, s"Expected 2 rows read for single partition, got $numRowsRead")
+        val numRowsRead = executedPlan
+          .collectFirst { case b: BatchScanExec => b.metrics(FlussMetrics.NUM_ROWS_READ).value }
+          .getOrElse(0L)
+        assert(numRowsRead == 2L, s"Expected 2 rows read for single partition, got $numRowsRead")
     }
   }
 
   test("Spark Read: partition-only filter should not leave FilterExec in plan (PK table)") {
     withPkPartitionedTable {
-      val query = sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE dt = '2026-01-01'")
-      checkAnswer(
-        query,
-        Row(700L, 22L, 602, "addr2", "2026-01-01") :: Row(
-          600L,
-          21L,
-          601,
-          "addr1",
-          "2026-01-01") :: Nil)
-      // Partition predicate extracted for partition pruning
-      assert(partitionPredicate(query).isDefined)
-      // No FilterExec should remain since all predicates are partition predicates
-      val executedPlan = query.queryExecution.executedPlan match {
-        case aqe: AdaptiveSparkPlanExec => aqe.executedPlan
-        case e: SparkPlan => e
-      }
-      assert(
-        !executedPlan.exists(_.isInstanceOf[FilterExec]),
-        s"Expected no Filter node in plan for partition-only predicate, got: $executedPlan")
+      tableName =>
+        val query = sql(s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE dt = '2026-01-01'")
+        checkAnswer(
+          query,
+          Row(700L, 22L, 602, "addr2", "2026-01-01") :: Row(
+            600L,
+            21L,
+            601,
+            "addr1",
+            "2026-01-01") :: Nil)
+        // Partition predicate extracted for partition pruning
+        assert(partitionPredicate(query).isDefined)
+        // No FilterExec should remain since all predicates are partition predicates
+        val executedPlan = query.queryExecution.executedPlan match {
+          case aqe: AdaptiveSparkPlanExec => aqe.executedPlan
+          case e: SparkPlan => e
+        }
+        assert(
+          !executedPlan.exists(_.isInstanceOf[FilterExec]),
+          s"Expected no Filter node in plan for partition-only predicate, got: $executedPlan")
 
-      val numRowsRead = executedPlan
-        .collectFirst { case b: BatchScanExec => b.metrics(FlussMetrics.NUM_ROWS_READ).value }
-        .getOrElse(0L)
-      assert(numRowsRead == 2L, s"Expected 2 rows read for single partition, got $numRowsRead")
+        val numRowsRead = executedPlan
+          .collectFirst { case b: BatchScanExec => b.metrics(FlussMetrics.NUM_ROWS_READ).value }
+          .getOrElse(0L)
+        assert(numRowsRead == 2L, s"Expected 2 rows read for single partition, got $numRowsRead")
     }
   }
 
-  private def withPkPartitionedTable(body: => Unit): Unit = withTable("t") {
-    sql(s"""
-           |CREATE TABLE $DEFAULT_DATABASE.t (
-           |  orderId BIGINT, itemId BIGINT, amount INT, address STRING, dt STRING
-           |)
-           |PARTITIONED BY (dt)
-           |TBLPROPERTIES("primary.key" = "orderId,dt", "bucket.num" = 1)""".stripMargin)
-    sql(s"""
-           |INSERT INTO $DEFAULT_DATABASE.t VALUES
-           |(600L, 21L, 601, "addr1", "2026-01-01"), (700L, 22L, 602, "addr2", "2026-01-01"),
-           |(800L, 23L, 603, "addr3", "2026-01-02"), (900L, 24L, 604, "addr4", "2026-01-02"),
-           |(1000L, 25L, 605, "addr5", "2026-01-03")
-           |""".stripMargin)
-    body
+  private def withPkPartitionedTable(body: String => Unit): Unit = {
+    val tableName = "pk_partition_" + UUID.randomUUID().toString.replace("-", "")
+    withTable(tableName) {
+      sql(s"""
+             |CREATE TABLE $DEFAULT_DATABASE.$tableName (
+             |  orderId BIGINT, itemId BIGINT, amount INT, address STRING, dt STRING
+             |)
+             |PARTITIONED BY (dt)
+             |TBLPROPERTIES("primary.key" = "orderId,dt", "bucket.num" = 1)""".stripMargin)
+      sql(s"""
+             |INSERT INTO $DEFAULT_DATABASE.$tableName VALUES
+             |(600L, 21L, 601, "addr1", "2026-01-01"), (700L, 22L, 602, "addr2", "2026-01-01"),
+             |(800L, 23L, 603, "addr3", "2026-01-02"), (900L, 24L, 604, "addr4", "2026-01-02"),
+             |(1000L, 25L, 605, "addr5", "2026-01-03")
+             |""".stripMargin)
+      body(tableName)
+    }
   }
 
   test("Spark Read: primary key table limit pushdown") {
     withPkPartitionedTable {
-      val dfNoLimit = sql(s"SELECT * FROM $DEFAULT_DATABASE.t")
-      assert(flussUpsertScan(dfNoLimit).flatMap(_.limit).isEmpty)
+      tableName =>
+        val dfNoLimit = sql(s"SELECT * FROM $DEFAULT_DATABASE.$tableName")
+        assert(flussUpsertScan(dfNoLimit).flatMap(_.limit).isEmpty)
 
-      val dfLimit = sql(s"SELECT * FROM $DEFAULT_DATABASE.t WHERE dt = '2026-01-01' LIMIT 1")
-      assert(flussUpsertScan(dfLimit).flatMap(_.limit).contains(1))
+        val dfLimit =
+          sql(s"SELECT * FROM $DEFAULT_DATABASE.$tableName WHERE dt = '2026-01-01' LIMIT 1")
+        assert(flussUpsertScan(dfLimit).flatMap(_.limit).contains(1))
 
-      // Verify limit pushdown actually reduces rows read via metrics
-      dfLimit.collect()
-      val batchScanExec = dfLimit.queryExecution.executedPlan.collectFirst {
-        case b: BatchScanExec => b
-      }.get
-      val numRowsRead = batchScanExec.metrics(FlussMetrics.NUM_ROWS_READ).value
-      assert(numRowsRead == 1L, s"Expected 1 rows read with limit pushdown, got $numRowsRead")
+        // Verify limit pushdown actually reduces rows read via metrics
+        dfLimit.collect()
+        val batchScanExec = dfLimit.queryExecution.executedPlan.collectFirst {
+          case b: BatchScanExec => b
+        }.get
+        val numRowsRead = batchScanExec.metrics(FlussMetrics.NUM_ROWS_READ).value
+        assert(numRowsRead == 1L, s"Expected 1 rows read with limit pushdown, got $numRowsRead")
     }
   }
 

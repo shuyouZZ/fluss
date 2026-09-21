@@ -20,8 +20,8 @@ package org.apache.fluss.spark
 import org.apache.fluss.client.admin.Admin
 import org.apache.fluss.config.{Configuration => FlussConfiguration}
 import org.apache.fluss.metadata.{TableInfo, TablePath}
+import org.apache.fluss.spark.adapter.SparkScanBuilderAdapter
 import org.apache.fluss.spark.catalog.{AbstractSparkTable, SupportsFlussPartitionManagement}
-import org.apache.fluss.spark.read.{FlussAppendScanBuilder, FlussUpsertScanBuilder}
 import org.apache.fluss.spark.write.{FlussAppendWriteBuilder, FlussUpsertWriteBuilder}
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -67,10 +67,6 @@ class SparkTable(
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
     val config = configWithSessionConfs()
-    if (tableInfo.getPrimaryKeys.isEmpty) {
-      new FlussAppendScanBuilder(tablePath, tableInfo, options, config)
-    } else {
-      new FlussUpsertScanBuilder(tablePath, tableInfo, options, config)
-    }
+    SparkScanBuilderAdapter.newScanBuilder(tablePath, tableInfo, options, config)
   }
 }

@@ -35,6 +35,9 @@ class SparkTimeRangeTvfTest extends FlussSparkTestBase {
   /** Snapshots are triggered explicitly, so no window can straddle an automatic one. */
   override protected def flussConf: Configuration = new Configuration()
 
+  /** Whether the Spark release supports TIMESTAMP_NTZ SQL literals. */
+  protected def supportsTimestampNtz: Boolean = true
+
   private val TVF = "fluss_incremental_between_timestamp"
 
   private val P1 = "2026-01-01"
@@ -327,14 +330,19 @@ class SparkTimeRangeTvfTest extends FlussSparkTestBase {
         val startTs = "2026-01-01 00:00:00"
         val endTs = "2026-01-02 00:00:00"
         val expected = FlussTimeRange(parseTs(startTs), parseTs(endTs))
-        Seq(
+        val timestampNtzForms = if (supportsTimestampNtz) {
+          Seq(s"TIMESTAMP_NTZ '$startTs', TIMESTAMP_NTZ '$endTs'")
+        } else {
+          Seq.empty
+        }
+        val forms = Seq(
           s"'${expected.startMs}', '${expected.endMs}'",
           s"${expected.startMs}L, ${expected.endMs}L",
           s"'$startTs', '$endTs'",
           s"TIMESTAMP '$startTs', TIMESTAMP '$endTs'",
-          s"TIMESTAMP_NTZ '$startTs', TIMESTAMP_NTZ '$endTs'",
           "DATE '2026-01-01', DATE '2026-01-02'"
-        ).foreach(args => assertThat(resolvedWindow("t_ts", args)).isEqualTo(expected))
+        ) ++ timestampNtzForms
+        forms.foreach(args => assertThat(resolvedWindow("t_ts", args)).isEqualTo(expected))
       }
 
       assertAllFormsAgree()

@@ -23,7 +23,7 @@ import org.apache.fluss.utils.PartitionUtils
 
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 
-import scala.jdk.CollectionConverters._
+import scala.collection.JavaConverters._
 
 /** Extracts a partition-key predicate and prunes the partition list at planning time. */
 object SparkPartitionPredicate {

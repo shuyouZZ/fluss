@@ -17,6 +17,8 @@
 
 package org.apache.spark.sql.catalyst.parser
 
+import org.apache.fluss.spark.adapter.SparkSqlAdapter
+
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.atn.PredictionMode
 import org.antlr.v4.runtime.misc.{Interval, ParseCancellationException}
@@ -100,8 +102,7 @@ class FlussSparkSqlParser(delegate: ParserInterface) extends ParserInterface {
       case e: ParseException =>
         throw e.withCommand(sqlText)
       case e: AnalysisException =>
-        val position = org.apache.spark.sql.catalyst.trees.Origin(e.line, e.startPosition)
-        throw new ParseException(Option(sqlText), e.message, position, position)
+        throw SparkSqlAdapter.parseException(Option(sqlText), e.message, e.line, e.startPosition)
     }
   }
 }
@@ -134,7 +135,6 @@ object FlussParseErrorListener extends BaseErrorListener {
       charPositionInLine: Int,
       msg: String,
       e: RecognitionException): Unit = {
-    val position = org.apache.spark.sql.catalyst.trees.Origin(Some(line), Some(charPositionInLine))
-    throw new ParseException(None, msg, position, position)
+    throw SparkSqlAdapter.parseException(None, msg, Some(line), Some(charPositionInLine))
   }
 }

@@ -18,6 +18,7 @@
 package org.apache.fluss.spark.catalyst.plans.logical
 
 import org.apache.fluss.spark.{SparkFlussConf, SparkTable}
+import org.apache.fluss.spark.adapter.SparkSqlAdapter
 import org.apache.fluss.spark.catalyst.plans.logical.FlussTableValuedFunctions._
 import org.apache.fluss.spark.read.FlussOffsetInitializers
 
@@ -25,12 +26,12 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
-import org.apache.spark.sql.catalyst.expressions.{Attribute, CurrentTimestamp, Expression, ExpressionInfo, RuntimeReplaceable}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, CurrentTimestamp, Expression, ExpressionInfo}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{DateType, IntegerType, LongType, ShortType, StringType, TimestampNTZType, TimestampType}
+import org.apache.spark.sql.types.{DateType, IntegerType, LongType, ShortType, StringType, TimestampType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.time.{LocalDate, LocalDateTime, ZoneId, ZoneOffset}
@@ -131,7 +132,7 @@ object FlussTableValuedFunctions {
   private[logical] def toTimestampOptionValue(fnName: String, expr: Expression): String = {
     // RuntimeReplaceable expressions (e.g. the `-` in `now() - INTERVAL 1 HOUR`) only become
     // evaluable once the optimizer rewrites them, which has not happened yet during analysis.
-    val evaluable = expr.transformUp { case r: RuntimeReplaceable => r.replacement }
+    val evaluable = SparkSqlAdapter.replaceRuntimeExpressions(expr)
 
     val value =
       try {
@@ -153,7 +154,8 @@ object FlussTableValuedFunctions {
       case ShortType | IntegerType | LongType => value.toString
       case DateType => dateDaysToEpochMillis(value.asInstanceOf[Int]).toString
       case TimestampType => (value.asInstanceOf[Long] / 1000L).toString
-      case TimestampNTZType => ntzMicrosToEpochMillis(value.asInstanceOf[Long]).toString
+      case timestamp if SparkSqlAdapter.isTimestampWithoutTimeZone(timestamp) =>
+        ntzMicrosToEpochMillis(value.asInstanceOf[Long]).toString
       case other =>
         throw new IllegalArgumentException(
           s"Unsupported timestamp argument type $other for $fnName. Use a STRING (epoch " +
