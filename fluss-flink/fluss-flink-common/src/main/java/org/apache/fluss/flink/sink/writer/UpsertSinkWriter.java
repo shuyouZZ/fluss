@@ -91,6 +91,7 @@ public class UpsertSinkWriter<InputT> extends FlinkSinkWriter<InputT> {
             upsert = upsert.partialUpdate(targetColumnIndexes);
         }
         upsertWriter = upsert.createWriter();
+        registerDataMetrics();
         LOG.info("Finished opening Fluss {}.", this.getClass().getSimpleName());
     }
 

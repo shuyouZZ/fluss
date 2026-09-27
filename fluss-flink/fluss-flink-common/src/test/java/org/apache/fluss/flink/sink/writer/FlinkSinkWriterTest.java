@@ -37,6 +37,7 @@ import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.runtime.metrics.MetricNames;
 import org.apache.flink.runtime.metrics.util.InterceptingOperatorMetricGroup;
@@ -105,6 +106,22 @@ public class FlinkSinkWriterTest extends FlinkTestBase {
         Metric numRecordSend = interceptingOperatorMetricGroup.get(MetricNames.NUM_RECORDS_SEND);
         assertThat(numRecordSend).isInstanceOf(Counter.class);
         assertThat(((Counter) numRecordSend).getCount()).isGreaterThan(0);
+
+        Metric outDataCount = interceptingOperatorMetricGroup.get("outDataCount");
+        assertThat(outDataCount).isInstanceOf(Counter.class);
+        assertThat(((Counter) outDataCount).getCount()).isEqualTo(1);
+
+        Metric outDataRate = interceptingOperatorMetricGroup.get("outDataRate");
+        assertThat(outDataRate).isInstanceOf(Meter.class);
+        assertThat(((Meter) outDataRate).getCount()).isEqualTo(1);
+
+        Metric outDataBytes = interceptingOperatorMetricGroup.get("outDataBytes");
+        assertThat(outDataBytes).isInstanceOf(Counter.class);
+        assertThat(((Counter) outDataBytes).getCount()).isPositive();
+
+        Metric outDataBytesRate = interceptingOperatorMetricGroup.get("outDataBytesRate");
+        assertThat(outDataBytesRate).isInstanceOf(Meter.class);
+        assertThat(((Meter) outDataBytesRate).getCount()).isPositive();
 
         flinkSinkWriter.close();
     }

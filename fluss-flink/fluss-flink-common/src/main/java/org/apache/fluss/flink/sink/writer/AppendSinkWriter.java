@@ -53,6 +53,7 @@ public class AppendSinkWriter<InputT> extends FlinkSinkWriter<InputT> {
         super.initialize(metricGroup);
 
         appendWriter = table.newAppend().createWriter();
+        registerDataMetrics();
         LOG.info("Finished opening Fluss {}.", this.getClass().getSimpleName());
     }
 

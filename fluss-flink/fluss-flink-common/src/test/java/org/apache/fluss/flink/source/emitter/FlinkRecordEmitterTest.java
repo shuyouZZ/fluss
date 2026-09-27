@@ -20,6 +20,7 @@ package org.apache.fluss.flink.source.emitter;
 import org.apache.fluss.client.table.scanner.ScanRecord;
 import org.apache.fluss.flink.source.deserializer.DeserializerInitContextImpl;
 import org.apache.fluss.flink.source.deserializer.RowDataDeserializationSchema;
+import org.apache.fluss.flink.source.metrics.FlinkSourceReaderMetrics;
 import org.apache.fluss.flink.source.reader.RecordAndPos;
 import org.apache.fluss.flink.source.split.HybridSnapshotLogSplit;
 import org.apache.fluss.flink.source.split.HybridSnapshotLogSplitState;
@@ -36,6 +37,9 @@ import org.apache.fluss.types.RowType;
 
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.connector.source.SourceOutput;
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
+import org.apache.flink.runtime.metrics.util.InterceptingOperatorMetricGroup;
 import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.Test;
 
@@ -61,7 +65,7 @@ public class FlinkRecordEmitterTest {
         HybridSnapshotLogSplitState splitState =
                 new HybridSnapshotLogSplitState(hybridSnapshotLogSplit);
 
-        ScanRecord scanRecord = new ScanRecord(-1, 100L, ChangeType.INSERT, row(1, "a"));
+        ScanRecord scanRecord = new ScanRecord(-1, 100L, ChangeType.INSERT, row(1, "a"), 42);
 
         DataType[] dataTypes = new DataType[] {DataTypes.INT(), DataTypes.STRING()};
 
@@ -75,7 +79,12 @@ public class FlinkRecordEmitterTest {
         RowDataDeserializationSchema deserializationSchema = new RowDataDeserializationSchema();
         deserializationSchema.open(new DeserializerInitContextImpl(null, null, sourceOutputType));
 
-        FlinkRecordEmitter<RowData> emitter = new FlinkRecordEmitter<>(deserializationSchema);
+        InterceptingOperatorMetricGroup operatorMetricGroup = new InterceptingOperatorMetricGroup();
+        FlinkSourceReaderMetrics sourceReaderMetrics =
+                new FlinkSourceReaderMetrics(
+                        InternalSourceReaderMetricGroup.wrap(operatorMetricGroup));
+        FlinkRecordEmitter<RowData> emitter =
+                new FlinkRecordEmitter<>(deserializationSchema, null, sourceReaderMetrics);
 
         TestSourceOutput<RowData> sourceOutput = new TestSourceOutput<>();
 
@@ -89,6 +98,8 @@ public class FlinkRecordEmitterTest {
         assertThat(splitState.isHybridSnapshotLogSplitState()).isTrue();
         assertThat(results).hasSize(1);
         assertThat(results).isEqualTo(expectedResult);
+        assertThat(((Counter) operatorMetricGroup.get("inDataCount")).getCount()).isEqualTo(1);
+        assertThat(((Counter) operatorMetricGroup.get("inDataBytes")).getCount()).isEqualTo(42);
     }
 
     @Test

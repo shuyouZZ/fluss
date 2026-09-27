@@ -20,11 +20,18 @@ package org.apache.fluss.flink.source.metrics;
 import org.apache.fluss.flink.source.reader.FlinkSourceReader;
 import org.apache.fluss.metrics.Gauge;
 
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.metrics.MeterView;
 import org.apache.flink.metrics.groups.SourceReaderMetricGroup;
 import org.apache.flink.runtime.metrics.MetricNames;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.IN_DATA_BYTES;
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.IN_DATA_BYTES_RATE;
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.IN_DATA_COUNT;
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.IN_DATA_RATE;
 
 /** A collection class for handling metrics in {@link FlinkSourceReader} of Fluss. */
 public class FlinkSourceReaderMetrics {
@@ -34,6 +41,10 @@ public class FlinkSourceReaderMetrics {
     // Source reader metric group
     private final SourceReaderMetricGroup sourceReaderMetricGroup;
     private final Set<Gauge<Long>> recordsLagMetrics = ConcurrentHashMap.newKeySet();
+    private final Counter inDataCount;
+    private final Counter inDataBytes;
+    private final Counter numRecordsIn;
+    private final Counter numBytesIn;
 
     // For currentFetchEventTimeLag metric
     private volatile long currentFetchEventTimeLag = UNINITIALIZED;
@@ -42,6 +53,22 @@ public class FlinkSourceReaderMetrics {
 
     public FlinkSourceReaderMetrics(SourceReaderMetricGroup sourceReaderMetricGroup) {
         this.sourceReaderMetricGroup = sourceReaderMetricGroup;
+        inDataCount = sourceReaderMetricGroup.counter(IN_DATA_COUNT);
+        sourceReaderMetricGroup.meter(IN_DATA_RATE, new MeterView(inDataCount));
+        inDataBytes = sourceReaderMetricGroup.counter(IN_DATA_BYTES);
+        sourceReaderMetricGroup.meter(IN_DATA_BYTES_RATE, new MeterView(inDataBytes));
+        numRecordsIn = sourceReaderMetricGroup.getIOMetricGroup().getNumRecordsInCounter();
+        numBytesIn = sourceReaderMetricGroup.getIOMetricGroup().getNumBytesInCounter();
+    }
+
+    /** Records a Fluss scan record consumed by this source reader. */
+    public void recordConsumed(int bytes) {
+        inDataCount.inc();
+        numRecordsIn.inc();
+        if (bytes >= 0) {
+            inDataBytes.inc(bytes);
+            numBytesIn.inc(bytes);
+        }
     }
 
     public void reportRecordEventTime(long lag) {

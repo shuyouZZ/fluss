@@ -446,7 +446,8 @@ public class FlinkSource<OUT>
                         context.getUserCodeClassLoader(),
                         scanRowType));
         FlinkRecordEmitter<OUT> recordEmitter =
-                new FlinkRecordEmitter<>(deserializationSchema, outputProjection);
+                new FlinkRecordEmitter<>(
+                        deserializationSchema, outputProjection, flinkSourceReaderMetrics);
 
         return new FlinkSourceReader<>(
                 elementsQueue,

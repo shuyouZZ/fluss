@@ -17,10 +17,14 @@
 
 package org.apache.fluss.flink.source.metrics;
 
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Meter;
+import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.metrics.MetricNames;
 import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
+import org.apache.flink.runtime.metrics.util.InterceptingOperatorMetricGroup;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -30,6 +34,54 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit test for {@link org.apache.fluss.flink.source.metrics.FlinkSourceReaderMetrics}. */
 class FlinkSourceReaderMetricsTest {
+
+    @Test
+    void testDataRateMetrics() {
+        InterceptingOperatorMetricGroup operatorMetricGroup = new InterceptingOperatorMetricGroup();
+        InternalSourceReaderMetricGroup sourceReaderMetricGroup =
+                InternalSourceReaderMetricGroup.wrap(operatorMetricGroup);
+        FlinkSourceReaderMetrics metrics = new FlinkSourceReaderMetrics(sourceReaderMetricGroup);
+
+        metrics.recordConsumed(42);
+
+        Metric inDataCount = operatorMetricGroup.get("inDataCount");
+        assertThat(inDataCount).isInstanceOf(Counter.class);
+        assertThat(((Counter) inDataCount).getCount()).isEqualTo(1);
+
+        Metric inDataRate = operatorMetricGroup.get("inDataRate");
+        assertThat(inDataRate).isInstanceOf(Meter.class);
+        assertThat(((Meter) inDataRate).getCount()).isEqualTo(1);
+
+        Metric inDataBytes = operatorMetricGroup.get("inDataBytes");
+        assertThat(inDataBytes).isInstanceOf(Counter.class);
+        assertThat(((Counter) inDataBytes).getCount()).isEqualTo(42);
+
+        Metric inDataBytesRate = operatorMetricGroup.get("inDataBytesRate");
+        assertThat(inDataBytesRate).isInstanceOf(Meter.class);
+        assertThat(((Meter) inDataBytesRate).getCount()).isEqualTo(42);
+
+        assertThat(sourceReaderMetricGroup.getIOMetricGroup().getNumRecordsInCounter().getCount())
+                .isEqualTo(1);
+        assertThat(sourceReaderMetricGroup.getIOMetricGroup().getNumBytesInCounter().getCount())
+                .isEqualTo(42);
+    }
+
+    @Test
+    void testDataRateMetricsIgnoreUnknownRecordSize() {
+        InterceptingOperatorMetricGroup operatorMetricGroup = new InterceptingOperatorMetricGroup();
+        InternalSourceReaderMetricGroup sourceReaderMetricGroup =
+                InternalSourceReaderMetricGroup.wrap(operatorMetricGroup);
+        FlinkSourceReaderMetrics metrics = new FlinkSourceReaderMetrics(sourceReaderMetricGroup);
+
+        metrics.recordConsumed(-1);
+
+        assertThat(((Counter) operatorMetricGroup.get("inDataCount")).getCount()).isEqualTo(1);
+        assertThat(((Counter) operatorMetricGroup.get("inDataBytes")).getCount()).isZero();
+        assertThat(sourceReaderMetricGroup.getIOMetricGroup().getNumRecordsInCounter().getCount())
+                .isEqualTo(1);
+        assertThat(sourceReaderMetricGroup.getIOMetricGroup().getNumBytesInCounter().getCount())
+                .isZero();
+    }
 
     @Test
     void testCurrentFetchEventTimeLag() {

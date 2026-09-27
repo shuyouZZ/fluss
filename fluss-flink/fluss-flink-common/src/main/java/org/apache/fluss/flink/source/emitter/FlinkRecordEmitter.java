@@ -20,6 +20,7 @@ package org.apache.fluss.flink.source.emitter;
 import org.apache.fluss.client.table.scanner.ScanRecord;
 import org.apache.fluss.flink.lake.LakeRecordRecordEmitter;
 import org.apache.fluss.flink.source.deserializer.FlussDeserializationSchema;
+import org.apache.fluss.flink.source.metrics.FlinkSourceReaderMetrics;
 import org.apache.fluss.flink.source.reader.FlinkSourceReader;
 import org.apache.fluss.flink.source.reader.RecordAndPos;
 import org.apache.fluss.flink.source.split.HybridSnapshotLogSplitState;
@@ -49,17 +50,26 @@ public class FlinkRecordEmitter<OUT> implements RecordEmitter<RecordAndPos, OUT,
 
     private final FlussDeserializationSchema<OUT> deserializationSchema;
     @Nullable private final OutputProjection<OUT> outputProjection;
+    @Nullable private final FlinkSourceReaderMetrics sourceReaderMetrics;
     private LakeRecordRecordEmitter<OUT> lakeRecordRecordEmitter;
 
     public FlinkRecordEmitter(FlussDeserializationSchema<OUT> deserializationSchema) {
-        this(deserializationSchema, null);
+        this(deserializationSchema, null, null);
     }
 
     public FlinkRecordEmitter(
             FlussDeserializationSchema<OUT> deserializationSchema,
             @Nullable OutputProjection<OUT> outputProjection) {
+        this(deserializationSchema, outputProjection, null);
+    }
+
+    public FlinkRecordEmitter(
+            FlussDeserializationSchema<OUT> deserializationSchema,
+            @Nullable OutputProjection<OUT> outputProjection,
+            @Nullable FlinkSourceReaderMetrics sourceReaderMetrics) {
         this.deserializationSchema = deserializationSchema;
         this.outputProjection = outputProjection;
+        this.sourceReaderMetrics = sourceReaderMetrics;
     }
 
     @Override
@@ -123,6 +133,9 @@ public class FlinkRecordEmitter<OUT> implements RecordEmitter<RecordAndPos, OUT,
      *     UPDATE_BEFORE records that are buffered pending their UPDATE_AFTER pair)
      */
     private boolean processAndEmitRecord(ScanRecord scanRecord, SourceOutput<OUT> sourceOutput) {
+        if (sourceReaderMetrics != null) {
+            sourceReaderMetrics.recordConsumed(scanRecord.getSizeInBytes());
+        }
         OUT record;
         try {
             record = deserializationSchema.deserialize(scanRecord);

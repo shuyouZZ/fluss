@@ -24,6 +24,8 @@ import org.apache.fluss.client.table.Table;
 import org.apache.fluss.client.table.writer.TableWriter;
 import org.apache.fluss.config.Configuration;
 import org.apache.fluss.exception.FlussRuntimeException;
+import org.apache.fluss.flink.metrics.FlinkMeter;
+import org.apache.fluss.flink.metrics.FlinkMeterCounter;
 import org.apache.fluss.flink.metrics.FlinkMetricRegistry;
 import org.apache.fluss.flink.row.OperationType;
 import org.apache.fluss.flink.row.RowWithOp;
@@ -49,8 +51,14 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.Collections;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.concurrent.CompletableFuture;
+
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.OUT_DATA_BYTES;
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.OUT_DATA_BYTES_RATE;
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.OUT_DATA_COUNT;
+import static org.apache.fluss.flink.metrics.FlinkConnectorMetricNames.OUT_DATA_RATE;
 
 /** Base class for Flink {@link SinkWriter} implementations in Fluss. */
 public abstract class FlinkSinkWriter<InputT> implements SinkWriter<InputT> {
@@ -107,7 +115,12 @@ public abstract class FlinkSinkWriter<InputT> implements SinkWriter<InputT> {
         this.metricGroup = metricGroup;
         flinkMetricRegistry =
                 new FlinkMetricRegistry(
-                        metricGroup, Collections.singleton(MetricNames.WRITER_SEND_LATENCY_MS));
+                        metricGroup,
+                        new HashSet<>(
+                                Arrays.asList(
+                                        MetricNames.WRITER_SEND_LATENCY_MS,
+                                        MetricNames.WRITER_RECORDS_SEND_RATE,
+                                        MetricNames.WRITER_BYTES_SEND_RATE)));
         connection = ConnectionFactory.createConnection(flussConfig, flinkMetricRegistry);
         table = connection.getTable(tablePath);
         LOG.info(
@@ -131,6 +144,26 @@ public abstract class FlinkSinkWriter<InputT> implements SinkWriter<InputT> {
         numRecordsOutCounter = metricGroup.getNumRecordsSendCounter();
         numRecordsOutErrorsCounter = metricGroup.getNumRecordsOutErrorsCounter();
         metricGroup.setCurrentSendTimeGauge(this::computeSendTime);
+    }
+
+    /** Registers data-rate metrics backed by the Fluss writer client's send meters. */
+    protected void registerDataMetrics() {
+        registerDataMetrics(MetricNames.WRITER_RECORDS_SEND_RATE, OUT_DATA_COUNT, OUT_DATA_RATE);
+        registerDataMetrics(
+                MetricNames.WRITER_BYTES_SEND_RATE, OUT_DATA_BYTES, OUT_DATA_BYTES_RATE);
+    }
+
+    private void registerDataMetrics(
+            String writerMetricName, String countMetricName, String rateMetricName) {
+        Metric metric = flinkMetricRegistry.getFlussMetric(writerMetricName);
+        if (!(metric instanceof org.apache.fluss.metrics.Meter)) {
+            throw new FlussRuntimeException(
+                    String.format("Fluss writer metric %s is not available.", writerMetricName));
+        }
+
+        org.apache.fluss.metrics.Meter meter = (org.apache.fluss.metrics.Meter) metric;
+        metricGroup.counter(countMetricName, new FlinkMeterCounter(meter));
+        metricGroup.meter(rateMetricName, new FlinkMeter(meter));
     }
 
     @Override
