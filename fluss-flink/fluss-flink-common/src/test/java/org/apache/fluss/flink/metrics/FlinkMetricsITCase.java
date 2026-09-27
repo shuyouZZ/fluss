@@ -34,8 +34,10 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
+import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.testutils.InMemoryReporter;
@@ -53,6 +55,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.fluss.flink.FlinkConnectorOptions.BOOTSTRAP_SERVERS;
 import static org.apache.fluss.flink.source.testutils.FlinkRowAssertionsUtils.assertResultsIgnoreOrder;
@@ -178,6 +181,8 @@ abstract class FlinkMetricsITCase {
         assertThat(sendLatencyMetrics).isInstanceOf(Gauge.class);
         // the default send latency is -1, so check it is >= 0, as the latency maybe very small 0ms
         assertThat((Long) ((Gauge<?>) sendLatencyMetrics).getValue()).isGreaterThanOrEqualTo(0);
+        assertDataRateMetrics(
+                jobID, "outDataCount", "outDataRate", "outDataBytes", "outDataBytesRate");
 
         // test scan
         tableResult = tEnv.executeSql("select * from test");
@@ -195,5 +200,44 @@ abstract class FlinkMetricsITCase {
         assertThat(scannerBytesPerRequest).isInstanceOf(Histogram.class);
         // just check scanner bytes per request is greater than 0
         assertThat(((Histogram) scannerBytesPerRequest).getCount()).isGreaterThan(0);
+        assertDataRateMetrics(jobID, "inDataCount", "inDataRate", "inDataBytes", "inDataBytesRate");
+    }
+
+    private void assertDataRateMetrics(
+            JobID jobID,
+            String countName,
+            String rateName,
+            String bytesName,
+            String bytesRateName) {
+        List<Tuple3<MetricGroup, String, Metric>> countMetrics =
+                findExactJobMetrics(jobID, countName);
+        assertThat(countMetrics).hasSize(1);
+        assertThat(countMetrics.get(0).f2).isInstanceOf(Counter.class);
+        assertThat(((Counter) countMetrics.get(0).f2).getCount()).isPositive();
+
+        List<Tuple3<MetricGroup, String, Metric>> rateMetrics =
+                findExactJobMetrics(jobID, rateName);
+        assertThat(rateMetrics).hasSize(1);
+        assertThat(rateMetrics.get(0).f2).isInstanceOf(Meter.class);
+        assertThat(((Meter) rateMetrics.get(0).f2).getCount()).isPositive();
+
+        List<Tuple3<MetricGroup, String, Metric>> bytesMetrics =
+                findExactJobMetrics(jobID, bytesName);
+        assertThat(bytesMetrics).hasSize(1);
+        assertThat(bytesMetrics.get(0).f2).isInstanceOf(Counter.class);
+        assertThat(((Counter) bytesMetrics.get(0).f2).getCount()).isPositive();
+
+        List<Tuple3<MetricGroup, String, Metric>> bytesRateMetrics =
+                findExactJobMetrics(jobID, bytesRateName);
+        assertThat(bytesRateMetrics).hasSize(1);
+        assertThat(bytesRateMetrics.get(0).f2).isInstanceOf(Meter.class);
+        assertThat(((Meter) bytesRateMetrics.get(0).f2).getCount()).isPositive();
+    }
+
+    private List<Tuple3<MetricGroup, String, Metric>> findExactJobMetrics(
+            JobID jobID, String metricName) {
+        return reporter.findJobMetricGroups(jobID, metricName).stream()
+                .filter(metric -> metric.f1.equals(metricName))
+                .collect(Collectors.toList());
     }
 }
