@@ -39,6 +39,7 @@ import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
+import org.apache.flink.metrics.View;
 import org.apache.flink.runtime.metrics.MetricNames;
 import org.apache.flink.runtime.metrics.util.InterceptingOperatorMetricGroup;
 import org.apache.flink.table.data.GenericRowData;
@@ -114,6 +115,9 @@ public class FlinkSinkWriterTest extends FlinkTestBase {
         Metric outDataRate = interceptingOperatorMetricGroup.get("outDataRate");
         assertThat(outDataRate).isInstanceOf(Meter.class);
         assertThat(((Meter) outDataRate).getCount()).isEqualTo(1);
+        assertThat(outDataRate).isInstanceOf(View.class);
+        ((View) outDataRate).update();
+        assertThat(((Meter) outDataRate).getRate()).isPositive();
 
         Metric outDataBytes = interceptingOperatorMetricGroup.get("outDataBytes");
         assertThat(outDataBytes).isInstanceOf(Counter.class);
@@ -122,6 +126,9 @@ public class FlinkSinkWriterTest extends FlinkTestBase {
         Metric outDataBytesRate = interceptingOperatorMetricGroup.get("outDataBytesRate");
         assertThat(outDataBytesRate).isInstanceOf(Meter.class);
         assertThat(((Meter) outDataBytesRate).getCount()).isPositive();
+        assertThat(outDataBytesRate).isInstanceOf(View.class);
+        ((View) outDataBytesRate).update();
+        assertThat(((Meter) outDataBytesRate).getRate()).isPositive();
 
         flinkSinkWriter.close();
     }

@@ -24,7 +24,6 @@ import org.apache.fluss.client.table.Table;
 import org.apache.fluss.client.table.writer.TableWriter;
 import org.apache.fluss.config.Configuration;
 import org.apache.fluss.exception.FlussRuntimeException;
-import org.apache.fluss.flink.metrics.FlinkMeter;
 import org.apache.fluss.flink.metrics.FlinkMeterCounter;
 import org.apache.fluss.flink.metrics.FlinkMetricRegistry;
 import org.apache.fluss.flink.row.OperationType;
@@ -41,6 +40,7 @@ import org.apache.fluss.row.InternalRow;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.metrics.Counter;
+import org.apache.flink.metrics.MeterView;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.types.logical.RowType;
@@ -162,8 +162,10 @@ public abstract class FlinkSinkWriter<InputT> implements SinkWriter<InputT> {
         }
 
         org.apache.fluss.metrics.Meter meter = (org.apache.fluss.metrics.Meter) metric;
-        metricGroup.counter(countMetricName, new FlinkMeterCounter(meter));
-        metricGroup.meter(rateMetricName, new FlinkMeter(meter));
+        FlinkMeterCounter counter = new FlinkMeterCounter(meter);
+        metricGroup.counter(countMetricName, counter);
+        // Flink schedules its MeterView to refresh the rate from the client send count.
+        metricGroup.meter(rateMetricName, new MeterView(counter));
     }
 
     @Override

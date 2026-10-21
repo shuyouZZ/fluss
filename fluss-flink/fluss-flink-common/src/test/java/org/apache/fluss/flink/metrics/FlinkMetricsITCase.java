@@ -33,6 +33,7 @@ import org.apache.fluss.types.DataTypes;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
@@ -52,7 +53,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -60,6 +64,7 @@ import java.util.stream.Collectors;
 import static org.apache.fluss.flink.FlinkConnectorOptions.BOOTSTRAP_SERVERS;
 import static org.apache.fluss.flink.source.testutils.FlinkRowAssertionsUtils.assertResultsIgnoreOrder;
 import static org.apache.fluss.server.testutils.FlussClusterExtension.BUILTIN_DATABASE;
+import static org.apache.fluss.testutils.common.CommonTestUtils.retry;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** The IT case for fluss reporting metrics to Flink. */
@@ -113,6 +118,7 @@ abstract class FlinkMetricsITCase {
     @BeforeEach
     void beforeEach() throws Exception {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().build());
+        tEnv.getConfig().getConfiguration().set(CoreOptions.DEFAULT_PARALLELISM, 1);
         String bootstrapServers = String.join(",", clientConf.get(ConfigOptions.BOOTSTRAP_SERVERS));
         // crate catalog using sql
         tEnv.executeSql(
@@ -201,6 +207,48 @@ abstract class FlinkMetricsITCase {
         // just check scanner bytes per request is greater than 0
         assertThat(((Histogram) scannerBytesPerRequest).getCount()).isGreaterThan(0);
         assertDataRateMetrics(jobID, "inDataCount", "inDataRate", "inDataBytes", "inDataBytesRate");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @MultiVersionTest
+    void testSinkDataRatesRefresh(boolean primaryKey) throws Exception {
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING());
+        if (primaryKey) {
+            schemaBuilder.primaryKey("id");
+        }
+        TableDescriptor descriptor =
+                TableDescriptor.builder().schema(schemaBuilder.build()).distributedBy(1).build();
+        createTable(TablePath.of(DEFAULT_DB, "input_table"), descriptor);
+        createTable(TablePath.of(DEFAULT_DB, "output_table"), descriptor);
+        tEnv.executeSql("INSERT INTO input_table VALUES (1, 'name1'), (2, 'name2')").await();
+
+        JobClient client =
+                tEnv.executeSql("INSERT INTO output_table SELECT * FROM input_table")
+                        .getJobClient()
+                        .get();
+        try {
+            retry(
+                    Duration.ofSeconds(30),
+                    () -> {
+                        JobID jobID = client.getJobID();
+                        assertDataRateMetrics(
+                                jobID,
+                                "outDataCount",
+                                "outDataRate",
+                                "outDataBytes",
+                                "outDataBytesRate");
+                        for (String name : Arrays.asList("outDataRate", "outDataBytesRate")) {
+                            Meter meter = (Meter) findExactJobMetrics(jobID, name).get(0).f2;
+                            assertThat(meter.getRate()).as(name).isPositive();
+                        }
+                    });
+        } finally {
+            client.cancel().get();
+        }
     }
 
     private void assertDataRateMetrics(
