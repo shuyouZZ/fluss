@@ -36,6 +36,11 @@ import org.apache.fluss.metadata.SchemaGetter;
 import org.apache.fluss.metadata.SchemaInfo;
 import org.apache.fluss.metadata.TableBucket;
 import org.apache.fluss.metadata.TablePath;
+import org.apache.fluss.metrics.Counter;
+import org.apache.fluss.metrics.Metric;
+import org.apache.fluss.metrics.MetricNames;
+import org.apache.fluss.metrics.groups.AbstractMetricGroup;
+import org.apache.fluss.metrics.registry.NOPMetricRegistry;
 import org.apache.fluss.record.BinaryValue;
 import org.apache.fluss.record.ChangeType;
 import org.apache.fluss.record.FileLogProjection;
@@ -73,6 +78,7 @@ import org.apache.fluss.server.log.FetchIsolation;
 import org.apache.fluss.server.log.LogAppendInfo;
 import org.apache.fluss.server.log.LogTablet;
 import org.apache.fluss.server.log.LogTestUtils;
+import org.apache.fluss.server.metrics.group.TableMetricGroup;
 import org.apache.fluss.server.metrics.group.TestingMetricGroups;
 import org.apache.fluss.server.zk.NOPErrorHandler;
 import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.RootAllocator;
@@ -1668,6 +1674,54 @@ class KvTabletTest {
                 .withSchemaGetter(schemaGetter)
                 .assertCheckSum(true)
                 .isEqualTo(expectedLogs);
+    }
+
+    @Test
+    void testArrowBatchMetricsExcludeDuplicateAndFailedAppends() throws Exception {
+        initLogTabletAndKvTablet(DATA1_SCHEMA_PK, new HashMap<>());
+        Map<String, Metric> registered = new HashMap<>();
+        TableMetricGroup metrics =
+                new TableMetricGroup(
+                        new NOPMetricRegistry() {
+                            @Override
+                            public void register(
+                                    Metric metric, String name, AbstractMetricGroup group) {
+                                registered.put(name, metric);
+                            }
+                        },
+                        TablePath.of("testDb", "t1"),
+                        true,
+                        TestingMetricGroups.TABLET_SERVER_METRICS);
+        logTablet.registerMetrics(metrics.addBucketMetricGroup(null, logTablet.getTableBucket()));
+        try {
+            List<KvRecord> data =
+                    Arrays.asList(
+                            kvRecordFactory.ofRecord("k1".getBytes(), new Object[] {1, "first"}),
+                            kvRecordFactory.ofRecord("k2".getBytes(), new Object[] {2, "second"}));
+            KvRecordBatch first = kvRecordBatchFactory.ofRecords(data, 100L, 0);
+            kvTablet.putAsLeader(first, null);
+            Counter batches = (Counter) registered.get(MetricNames.ARROW_LOG_BATCHES_TOTAL);
+            Counter records = (Counter) registered.get(MetricNames.ARROW_LOG_RECORDS_TOTAL);
+            assertThat(batches.getCount()).isEqualTo(1);
+            assertThat(records.getCount()).isEqualTo(2);
+            long bytes = ((Counter) registered.get(MetricNames.ARROW_LOG_BYTES_TOTAL)).getCount();
+            assertThat(bytes).isPositive();
+            kvTablet.putAsLeader(first, null);
+            assertThat(batches.getCount()).isEqualTo(1);
+            assertThat(((Counter) registered.get(MetricNames.ARROW_LOG_BYTES_TOTAL)).getCount())
+                    .isEqualTo(bytes);
+            kvTablet.putAsLeader(kvRecordBatchFactory.ofRecords(data, 100L, 1), null);
+            assertThat(batches.getCount()).isEqualTo(2);
+            assertThat(records.getCount()).isEqualTo(6);
+            assertThatThrownBy(
+                            () ->
+                                    kvTablet.putAsLeader(
+                                            kvRecordBatchFactory.ofRecords(data, 100L, 3), null))
+                    .isInstanceOf(OutOfOrderSequenceException.class);
+            assertThat(batches.getCount()).isEqualTo(2);
+        } finally {
+            metrics.close();
+        }
     }
 
     @Test

@@ -41,6 +41,7 @@ import org.apache.fluss.record.LogRecords;
 import org.apache.fluss.record.MemoryLogRecords;
 import org.apache.fluss.server.log.LocalLog.SegmentDeletionReason;
 import org.apache.fluss.server.metrics.group.BucketMetricGroup;
+import org.apache.fluss.server.metrics.group.TableMetricGroup;
 import org.apache.fluss.server.metrics.group.TabletServerMetricGroup;
 import org.apache.fluss.utils.FlussPaths;
 import org.apache.fluss.utils.clock.Clock;
@@ -112,6 +113,7 @@ public final class LogTablet {
     private volatile boolean isDataLakeEnabled;
     private final Clock clock;
     private final boolean isChangeLog;
+    @Nullable private volatile TableMetricGroup tableMetricGroup;
 
     private final AtomicBoolean rollExpiredActiveSegmentEnabled;
     private final boolean remoteLogEnabled;
@@ -460,6 +462,7 @@ public final class LogTablet {
 
     /** Register metrics for this log tablet in the metric group. */
     public void registerMetrics(BucketMetricGroup bucketMetricGroup) {
+        this.tableMetricGroup = bucketMetricGroup.getTableMetricGroup();
         MetricGroup metricGroup = bucketMetricGroup.addGroup("log");
         metricGroup.gauge(
                 MetricNames.LOG_NUM_SEGMENTS, () -> localLog.getSegments().numberOfSegments());
@@ -497,6 +500,16 @@ public final class LogTablet {
      */
     public LogAppendInfo appendAsLeader(MemoryLogRecords records) throws Exception {
         return append(records, true);
+    }
+
+    /** Records a newly appended Arrow CDC batch; duplicate and follower appends are excluded. */
+    public void recordArrowLogBatch(
+            int records, int bytes, int metadataBytes, int bodyBytes, int uncompressedBodyBytes) {
+        TableMetricGroup metrics = tableMetricGroup;
+        if (metrics != null) {
+            metrics.recordArrowLogBatch(
+                    records, bytes, metadataBytes, bodyBytes, uncompressedBodyBytes);
+        }
     }
 
     /** Append this message set to the active segment of the local log without assigning offsets. */

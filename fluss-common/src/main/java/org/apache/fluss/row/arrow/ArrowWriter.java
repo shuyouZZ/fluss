@@ -101,6 +101,9 @@ public class ArrowWriter implements AutoCloseable {
 
     private int estimatedMaxRecordsCount;
     private int recordsCount;
+    private int serializedMetadataLength;
+    private int serializedBodyLength;
+    private int serializedUncompressedBodyLength;
 
     /** The latest estimated compression ratio for this ArrowWriter. */
     private float estimatedCompressionRatio;
@@ -261,6 +264,9 @@ public class ArrowWriter implements AutoCloseable {
      * when pages have already been advanced (e.g., after writing statistics data).
      */
     public int serializeToOutputView(AbstractPagedOutputView outputView) throws IOException {
+        serializedMetadataLength = 0;
+        serializedBodyLength = 0;
+        serializedUncompressedBodyLength = 0;
         if (recordsCount == 0) {
             return 0;
         }
@@ -283,8 +289,26 @@ public class ArrowWriter implements AutoCloseable {
                     (float) block.getBodyLength() / uncompressedBodySizeInBytes;
             compressionRatioEstimator.updateEstimation(actualCompressionRatio);
 
-            return (int) (block.getMetadataLength() + block.getBodyLength());
+            serializedMetadataLength = (int) block.getMetadataLength();
+            serializedBodyLength = (int) block.getBodyLength();
+            serializedUncompressedBodyLength = uncompressedBodySizeInBytes;
+            return serializedMetadataLength + serializedBodyLength;
         }
+    }
+
+    /** Returns the actual IPC metadata bytes from the last serialization, before recycling. */
+    public int getSerializedMetadataLength() {
+        return serializedMetadataLength;
+    }
+
+    /** Returns the actual encoded body bytes from the last serialization, before recycling. */
+    public int getSerializedBodyLength() {
+        return serializedBodyLength;
+    }
+
+    /** Returns the uncompressed Arrow body bytes measured during the last serialization. */
+    public int getSerializedUncompressedBodyLength() {
+        return serializedUncompressedBodyLength;
     }
 
     public long getEpoch() {

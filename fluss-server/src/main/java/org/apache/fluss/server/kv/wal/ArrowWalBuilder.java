@@ -58,6 +58,21 @@ public class ArrowWalBuilder implements WalBuilder {
         return MemoryLogRecords.pointToByteBuffer(bytesView.getByteBuf().nioBuffer());
     }
 
+    /** Returns the actual serialized Arrow IPC metadata bytes of the built batch. */
+    public int getArrowMetadataSizeInBytes() {
+        return recordsBuilder.getArrowMetadataSizeInBytes();
+    }
+
+    /** Returns the actual encoded Arrow body bytes of the built batch. */
+    public int getArrowBodySizeInBytes() {
+        return recordsBuilder.getArrowBodySizeInBytes();
+    }
+
+    /** Returns the uncompressed Arrow body bytes of the built batch. */
+    public int getArrowUncompressedBodySizeInBytes() {
+        return recordsBuilder.getArrowUncompressedBodySizeInBytes();
+    }
+
     @Override
     public void setWriterState(long writerId, int batchSequence) {
         recordsBuilder.setWriterState(writerId, batchSequence);

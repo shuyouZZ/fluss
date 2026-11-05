@@ -18,10 +18,12 @@
 package org.apache.fluss.metrics.prometheus;
 
 import org.apache.fluss.metrics.Counter;
+import org.apache.fluss.metrics.DescriptiveStatisticsHistogram;
 import org.apache.fluss.metrics.Gauge;
 import org.apache.fluss.metrics.Histogram;
 import org.apache.fluss.metrics.Meter;
 import org.apache.fluss.metrics.Metric;
+import org.apache.fluss.metrics.MetricNames;
 import org.apache.fluss.metrics.SimpleCounter;
 import org.apache.fluss.metrics.groups.MetricGroup;
 import org.apache.fluss.metrics.util.TestHistogram;
@@ -119,6 +121,32 @@ class PrometheusReporterTest {
             throws UnirestException {
         assertThat(addMetricAndPollResponse(metric, name))
                 .contains(createExpectedPollResponse(name, "", "gauge", expectedValue));
+    }
+
+    @Test
+    void arrowCompressionRatioGaugePreservesFractionalValues() throws UnirestException {
+        Gauge<Double> ratio = () -> 0.625;
+        assertThatGaugeIsExported(ratio, MetricNames.ARROW_LOG_ACTUAL_COMPRESSION_RATIO, "0.625");
+    }
+
+    @Test
+    void arrowBatchHistogramsAreExportedWithCountsAndQuantiles() throws UnirestException {
+        for (String name :
+                Arrays.asList(
+                        MetricNames.ARROW_LOG_BATCH_RECORDS,
+                        MetricNames.ARROW_LOG_BATCH_BYTES,
+                        MetricNames.ARROW_LOG_BATCH_METADATA_BYTES,
+                        MetricNames.ARROW_LOG_BATCH_BODY_BYTES,
+                        MetricNames.ARROW_LOG_BATCH_UNCOMPRESSED_BODY_BYTES)) {
+            Histogram histogram = new DescriptiveStatisticsHistogram(1024);
+            histogram.update(0);
+            histogram.update(2);
+            histogram.update(4);
+            String response = addMetricAndPollResponse(histogram, name);
+            assertThat(response)
+                    .contains(createExpectedPollResponse(name, "_count", "summary", "3.0"))
+                    .contains(SCOPE_PREFIX + name + "{" + DIMENSIONS + ",quantile=\"0.5\",} 2.0\n");
+        }
     }
 
     @Test

@@ -17,6 +17,8 @@
 
 package org.apache.fluss.server.kv.wal;
 
+import org.apache.fluss.compression.ArrowCompressionInfo;
+import org.apache.fluss.compression.ArrowCompressionType;
 import org.apache.fluss.config.ConfigOptions;
 import org.apache.fluss.config.Configuration;
 import org.apache.fluss.config.MemorySize;
@@ -25,6 +27,7 @@ import org.apache.fluss.memory.MemorySegment;
 import org.apache.fluss.memory.MemorySegmentPool;
 import org.apache.fluss.metadata.TableBucket;
 import org.apache.fluss.record.ChangeType;
+import org.apache.fluss.record.LogRecordBatch;
 import org.apache.fluss.record.MemoryLogRecords;
 import org.apache.fluss.row.arrow.ArrowWriterPool;
 import org.apache.fluss.row.arrow.ArrowWriterProvider;
@@ -37,10 +40,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.fluss.compression.ArrowCompressionInfo.DEFAULT_COMPRESSION;
+import static org.apache.fluss.compression.ArrowCompressionInfo.NO_COMPRESSION;
+import static org.apache.fluss.record.LogRecordBatchFormat.recordBatchHeaderSize;
 import static org.apache.fluss.record.TestData.DATA1_ROW_TYPE;
 import static org.apache.fluss.record.TestData.DATA1_TABLE_ID_PK;
 import static org.apache.fluss.record.TestData.DEFAULT_SCHEMA_ID;
@@ -148,6 +156,120 @@ class ArrowWalBuilderTest {
             memorySegment.put(50, (byte) 4);
         }
         assertThat(logRecords.batches().iterator().next().isValid()).isFalse();
+    }
+
+    @Test
+    void testSerializedSizesIncludeActualIpcMetadataAndEncodedBody() throws Exception {
+        TableBucket tb = new TableBucket(DATA1_TABLE_ID_PK, 0);
+        LazyMemorySegmentPool pool = LazyMemorySegmentPool.createWriterBufferPool(conf);
+        ArrowWalBuilder builder = (ArrowWalBuilder) createWalBuilder(tb, 1024, pool);
+        try {
+            builder.append(ChangeType.INSERT, row(1, "initial value"));
+            builder.append(ChangeType.UPDATE_BEFORE, row(1, "initial value"));
+            builder.append(ChangeType.UPDATE_AFTER, row(1, "updated value"));
+            MemoryLogRecords records = builder.build();
+            LogRecordBatch batch = records.batches().iterator().next();
+            int headerBytes = recordBatchHeaderSize(batch.magic());
+            int arrowOffset = headerBytes + batch.getRecordCount();
+            ByteBuffer buffer =
+                    records.getMemorySegment()
+                            .wrap(records.getPosition(), records.sizeInBytes())
+                            .order(ByteOrder.LITTLE_ENDIAN);
+            int firstWord = buffer.getInt(arrowOffset);
+            int metadataBytes =
+                    firstWord == -1 ? 8 + buffer.getInt(arrowOffset + 4) : 4 + firstWord;
+            assertThat(batch.getRecordCount()).isEqualTo(3);
+            assertThat(builder.getArrowMetadataSizeInBytes()).isEqualTo(metadataBytes).isPositive();
+            assertThat(builder.getArrowBodySizeInBytes()).isPositive();
+            assertThat(headerBytes + 3 + metadataBytes + builder.getArrowBodySizeInBytes())
+                    .isEqualTo(records.sizeInBytes());
+            assertThat(builder.build().sizeInBytes()).isEqualTo(records.sizeInBytes());
+            assertLogRecordsEqualsWithRowKind(
+                    DATA1_ROW_TYPE,
+                    records,
+                    Arrays.asList(
+                            Tuple2.of(ChangeType.INSERT, new Object[] {1, "initial value"}),
+                            Tuple2.of(ChangeType.UPDATE_BEFORE, new Object[] {1, "initial value"}),
+                            Tuple2.of(ChangeType.UPDATE_AFTER, new Object[] {1, "updated value"})));
+        } finally {
+            builder.deallocate();
+        }
+    }
+
+    @Test
+    void testEmptyBatchSizesDoNotLeakFromRecycledWriter() throws Exception {
+        TableBucket tb = new TableBucket(DATA1_TABLE_ID_PK, 0);
+        LazyMemorySegmentPool pool = LazyMemorySegmentPool.createWriterBufferPool(conf);
+        ArrowWalBuilder populated = (ArrowWalBuilder) createWalBuilder(tb, 1024, pool);
+        populated.append(ChangeType.INSERT, row(1, "value"));
+        populated.build();
+        int previousMetadata = populated.getArrowMetadataSizeInBytes();
+        int previousBody = populated.getArrowBodySizeInBytes();
+        int previousUncompressedBody = populated.getArrowUncompressedBodySizeInBytes();
+        populated.deallocate();
+        ArrowWalBuilder empty = (ArrowWalBuilder) createWalBuilder(tb, 1024, pool);
+        try {
+            MemoryLogRecords records = empty.build();
+            LogRecordBatch batch = records.batches().iterator().next();
+            assertThat(batch.getRecordCount()).isZero();
+            assertThat(empty.getArrowMetadataSizeInBytes()).isZero();
+            assertThat(empty.getArrowBodySizeInBytes()).isZero();
+            assertThat(empty.getArrowUncompressedBodySizeInBytes()).isZero();
+            assertThat(records.sizeInBytes()).isEqualTo(recordBatchHeaderSize(batch.magic()));
+            assertThat(populated.getArrowMetadataSizeInBytes())
+                    .isEqualTo(previousMetadata)
+                    .isPositive();
+            assertThat(populated.getArrowBodySizeInBytes()).isEqualTo(previousBody).isPositive();
+            assertThat(populated.getArrowUncompressedBodySizeInBytes())
+                    .isEqualTo(previousUncompressedBody)
+                    .isPositive();
+        } finally {
+            empty.deallocate();
+        }
+    }
+
+    @Test
+    void testUncompressedBodySizeForEachCompressionCodec() throws Exception {
+        TableBucket tb = new TableBucket(DATA1_TABLE_ID_PK, 0);
+        LazyMemorySegmentPool pool = LazyMemorySegmentPool.createWriterBufferPool(conf);
+        int uncompressedSize = -1;
+        for (ArrowCompressionInfo compression :
+                Arrays.asList(
+                        NO_COMPRESSION,
+                        DEFAULT_COMPRESSION,
+                        new ArrowCompressionInfo(ArrowCompressionType.LZ4_FRAME, -1))) {
+            ArrowWalBuilder builder =
+                    new ArrowWalBuilder(
+                            DEFAULT_SCHEMA_ID,
+                            arrowWriterProvider.getOrCreateWriter(
+                                    tb.getTableId(),
+                                    DEFAULT_SCHEMA_ID,
+                                    1024 * 1024,
+                                    DATA1_ROW_TYPE,
+                                    compression),
+                            pool);
+            try {
+                for (int i = 0; i < 256; i++) {
+                    builder.append(
+                            ChangeType.INSERT,
+                            row(
+                                    i,
+                                    "repeated repeated repeated repeated repeated repeated repeated repeated"));
+                }
+                builder.build();
+                int raw = builder.getArrowUncompressedBodySizeInBytes();
+                assertThat(raw).isPositive();
+                if (compression == NO_COMPRESSION) {
+                    uncompressedSize = raw;
+                    assertThat(builder.getArrowBodySizeInBytes()).isEqualTo(raw);
+                } else {
+                    assertThat(raw).isEqualTo(uncompressedSize);
+                    assertThat(builder.getArrowBodySizeInBytes()).isLessThan(raw);
+                }
+            } finally {
+                builder.deallocate();
+            }
+        }
     }
 
     private WalBuilder createWalBuilder(

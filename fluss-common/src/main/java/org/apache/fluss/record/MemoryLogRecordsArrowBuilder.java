@@ -70,6 +70,9 @@ public class MemoryLogRecordsArrowBuilder implements AutoCloseable {
     private int batchSequence;
     private int estimatedSizeInBytes;
     private int recordCount;
+    private int arrowMetadataSizeInBytes;
+    private int arrowBodySizeInBytes;
+    private int arrowUncompressedBodySizeInBytes;
     private volatile boolean isClosed;
     private boolean reCalculateSizeInBytes = false;
     private boolean resetBatchHeader = false;
@@ -228,6 +231,11 @@ public class MemoryLogRecordsArrowBuilder implements AutoCloseable {
             arrowWriter.serializeToOutputView(pagedOutputView, headerSize + changeTypeSize);
         }
 
+        // Capture sizes before recycling: the pooled writer may immediately be reused.
+        arrowMetadataSizeInBytes = arrowWriter.getSerializedMetadataLength();
+        arrowBodySizeInBytes = arrowWriter.getSerializedBodyLength();
+        arrowUncompressedBodySizeInBytes = arrowWriter.getSerializedUncompressedBodyLength();
+
         // Reset the statistics collector for reuse
         if (statisticsCollector != null) {
             statisticsCollector.reset();
@@ -324,6 +332,21 @@ public class MemoryLogRecordsArrowBuilder implements AutoCloseable {
 
     public void recycleArrowWriter() {
         arrowWriter.recycle(writerEpoch);
+    }
+
+    /** Returns the actual Arrow IPC metadata bytes captured by build(). */
+    public int getArrowMetadataSizeInBytes() {
+        return arrowMetadataSizeInBytes;
+    }
+
+    /** Returns the actual encoded Arrow body bytes captured by build(). */
+    public int getArrowBodySizeInBytes() {
+        return arrowBodySizeInBytes;
+    }
+
+    /** Returns the actual uncompressed Arrow body bytes captured by build(). */
+    public int getArrowUncompressedBodySizeInBytes() {
+        return arrowUncompressedBodySizeInBytes;
     }
 
     public int estimatedSizeInBytes() {

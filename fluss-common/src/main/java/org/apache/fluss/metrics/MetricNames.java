@@ -299,6 +299,23 @@ public class MetricNames {
     public static final String REMOTE_LOG_SIZE = "size";
     public static final String LOG_LAKE_TIMESTAMP_LAG = "timestampLag";
 
+    // Successfully appended leader Arrow CDC batches.
+    public static final String ARROW_LOG_BATCH_RECORDS = "arrowLogBatchRecords";
+    public static final String ARROW_LOG_ACTUAL_COMPRESSION_RATIO =
+            "arrowLogActualCompressionRatio";
+    public static final String ARROW_LOG_BATCH_BYTES = "arrowLogBatchBytes";
+    public static final String ARROW_LOG_BATCH_METADATA_BYTES = "arrowLogBatchMetadataBytes";
+    public static final String ARROW_LOG_BATCH_BODY_BYTES = "arrowLogBatchBodyBytes";
+    public static final String ARROW_LOG_BATCHES_TOTAL = "arrowLogBatchesTotal";
+    public static final String ARROW_LOG_RECORDS_TOTAL = "arrowLogRecordsTotal";
+    public static final String ARROW_LOG_BYTES_TOTAL = "arrowLogBytesTotal";
+    public static final String ARROW_LOG_METADATA_BYTES_TOTAL = "arrowLogMetadataBytesTotal";
+    public static final String ARROW_LOG_BODY_BYTES_TOTAL = "arrowLogBodyBytesTotal";
+    public static final String ARROW_LOG_BATCH_UNCOMPRESSED_BODY_BYTES =
+            "arrowLogBatchUncompressedBodyBytes";
+    public static final String ARROW_LOG_UNCOMPRESSED_BODY_BYTES_TOTAL =
+            "arrowLogUncompressedBodyBytesTotal";
+
     // for physical storage
     public static final String BUCKET_PHYSICAL_STORAGE_LOCAL_LOG_SIZE = "localLogSize";
 

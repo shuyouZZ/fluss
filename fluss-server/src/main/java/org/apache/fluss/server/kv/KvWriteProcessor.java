@@ -35,6 +35,8 @@ import org.apache.fluss.record.ChangeType;
 import org.apache.fluss.record.KvRecord;
 import org.apache.fluss.record.KvRecordBatch;
 import org.apache.fluss.record.KvRecordReadContext;
+import org.apache.fluss.record.LogRecordBatch;
+import org.apache.fluss.record.MemoryLogRecords;
 import org.apache.fluss.row.BinaryRow;
 import org.apache.fluss.row.PaddingRow;
 import org.apache.fluss.row.arrow.ArrowWriterProvider;
@@ -197,12 +199,22 @@ public final class KvWriteProcessor {
             // put a batch into file with recordCount 0 and offset plus 1L, it will
             // update the batchSequence corresponding to the writerId and also increment
             // the CDC log offset by 1.
-            LogAppendInfo logAppendInfo = logTablet.appendAsLeader(walBuilder.build());
+            MemoryLogRecords logRecords = walBuilder.build();
+            LogAppendInfo logAppendInfo = logTablet.appendAsLeader(logRecords);
 
             // if the batch is duplicated, we should truncate the state pre-write
             // buffer already written.
             if (logAppendInfo.duplicated()) {
                 stateAccessor.truncateTo(logEndOffsetOfPrevBatch, TruncateReason.DUPLICATED);
+            } else if (walBuilder instanceof ArrowWalBuilder) {
+                ArrowWalBuilder arrowWalBuilder = (ArrowWalBuilder) walBuilder;
+                LogRecordBatch batch = logRecords.batches().iterator().next();
+                logTablet.recordArrowLogBatch(
+                        batch.getRecordCount(),
+                        logRecords.sizeInBytes(),
+                        arrowWalBuilder.getArrowMetadataSizeInBytes(),
+                        arrowWalBuilder.getArrowBodySizeInBytes(),
+                        arrowWalBuilder.getArrowUncompressedBodySizeInBytes());
             }
             return logAppendInfo;
         } catch (Throwable t) {

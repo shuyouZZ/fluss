@@ -118,6 +118,15 @@ public class TableMetricGroup extends AbstractMetricGroup {
         super.close();
     }
 
+    /** Samples actual serialized sizes of a successful, non-duplicate leader Arrow CDC batch. */
+    public void recordArrowLogBatch(
+            int records, int bytes, int metadataBytes, int bodyBytes, int uncompressedBodyBytes) {
+        if (logMetrics.arrowBatchMetrics != null) {
+            logMetrics.arrowBatchMetrics.record(
+                    records, bytes, metadataBytes, bodyBytes, uncompressedBodyBytes);
+        }
+    }
+
     public void incLogMessageIn(long n) {
         logMetrics.messagesIn.inc(n);
         serverMetrics.messageIn().inc(n);
@@ -529,6 +538,8 @@ public class TableMetricGroup extends AbstractMetricGroup {
 
     private static class LogMetricGroup extends TabletMetricGroup {
 
+        @Nullable private final ArrowBatchMetrics arrowBatchMetrics;
+
         private final Counter totalFetchLogRequests;
         private final Counter failedFetchLogRequests;
 
@@ -545,6 +556,8 @@ public class TableMetricGroup extends AbstractMetricGroup {
 
         private LogMetricGroup(TableMetricGroup tableMetricGroup, TabletType groupType) {
             super(tableMetricGroup, groupType);
+            arrowBatchMetrics =
+                    groupType == TabletType.CDC_LOG ? new ArrowBatchMetrics(this) : null;
             // for fetch log requests
             totalFetchLogRequests = new ThreadSafeSimpleCounter();
             meter(MetricNames.TOTAL_FETCH_LOG_REQUESTS_RATE, new MeterView(totalFetchLogRequests));
@@ -722,6 +735,88 @@ public class TableMetricGroup extends AbstractMetricGroup {
         @Override
         protected String getGroupName(CharacterFilter filter) {
             return "historical";
+        }
+    }
+
+    /** Bounded-window distributions plus cumulative totals for weighted aggregation. */
+    private static final class ArrowBatchMetrics {
+        private static final int WINDOW_SIZE = 1024;
+        private final Histogram recordsPerBatch;
+        private final Histogram bytesPerBatch;
+        private final Histogram metadataBytesPerBatch;
+        private final Histogram bodyBytesPerBatch;
+        private final Histogram uncompressedBodyBytesPerBatch;
+        private volatile double actualCompressionRatio = Double.NaN;
+        private final Counter batches;
+        private final Counter records;
+        private final Counter bytes;
+        private final Counter metadataBytes;
+        private final Counter bodyBytes;
+        private final Counter uncompressedBodyBytes;
+
+        private ArrowBatchMetrics(LogMetricGroup group) {
+            group.gauge(
+                    MetricNames.ARROW_LOG_ACTUAL_COMPRESSION_RATIO, () -> actualCompressionRatio);
+            recordsPerBatch =
+                    group.histogram(
+                            MetricNames.ARROW_LOG_BATCH_RECORDS,
+                            new DescriptiveStatisticsHistogram(WINDOW_SIZE));
+            bytesPerBatch =
+                    group.histogram(
+                            MetricNames.ARROW_LOG_BATCH_BYTES,
+                            new DescriptiveStatisticsHistogram(WINDOW_SIZE));
+            metadataBytesPerBatch =
+                    group.histogram(
+                            MetricNames.ARROW_LOG_BATCH_METADATA_BYTES,
+                            new DescriptiveStatisticsHistogram(WINDOW_SIZE));
+            bodyBytesPerBatch =
+                    group.histogram(
+                            MetricNames.ARROW_LOG_BATCH_BODY_BYTES,
+                            new DescriptiveStatisticsHistogram(WINDOW_SIZE));
+            uncompressedBodyBytesPerBatch =
+                    group.histogram(
+                            MetricNames.ARROW_LOG_BATCH_UNCOMPRESSED_BODY_BYTES,
+                            new DescriptiveStatisticsHistogram(WINDOW_SIZE));
+            uncompressedBodyBytes =
+                    group.counter(
+                            MetricNames.ARROW_LOG_UNCOMPRESSED_BODY_BYTES_TOTAL,
+                            new ThreadSafeSimpleCounter());
+            batches =
+                    group.counter(
+                            MetricNames.ARROW_LOG_BATCHES_TOTAL, new ThreadSafeSimpleCounter());
+            records =
+                    group.counter(
+                            MetricNames.ARROW_LOG_RECORDS_TOTAL, new ThreadSafeSimpleCounter());
+            bytes = group.counter(MetricNames.ARROW_LOG_BYTES_TOTAL, new ThreadSafeSimpleCounter());
+            metadataBytes =
+                    group.counter(
+                            MetricNames.ARROW_LOG_METADATA_BYTES_TOTAL,
+                            new ThreadSafeSimpleCounter());
+            bodyBytes =
+                    group.counter(
+                            MetricNames.ARROW_LOG_BODY_BYTES_TOTAL, new ThreadSafeSimpleCounter());
+        }
+
+        private void record(
+                int recordCount,
+                int batchBytes,
+                int metadataSize,
+                int bodySize,
+                int uncompressedBodySize) {
+            recordsPerBatch.update(recordCount);
+            bytesPerBatch.update(batchBytes);
+            metadataBytesPerBatch.update(metadataSize);
+            bodyBytesPerBatch.update(bodySize);
+            uncompressedBodyBytesPerBatch.update(uncompressedBodySize);
+            if (uncompressedBodySize > 0) {
+                actualCompressionRatio = (double) bodySize / uncompressedBodySize;
+            }
+            batches.inc();
+            records.inc(recordCount);
+            bytes.inc(batchBytes);
+            metadataBytes.inc(metadataSize);
+            bodyBytes.inc(bodySize);
+            uncompressedBodyBytes.inc(uncompressedBodySize);
         }
     }
 
