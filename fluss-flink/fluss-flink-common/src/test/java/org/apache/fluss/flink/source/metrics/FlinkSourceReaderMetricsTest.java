@@ -137,4 +137,42 @@ class FlinkSourceReaderMetricsTest {
         flinkSourceReaderMetrics.removeRecordsLagMetric(secondRecordsLagMetric);
         assertThat((long) pendingRecords.get().getValue()).isEqualTo(0L);
     }
+
+    @Test
+    void testQueuedRecordsAndBatchesLifecycle() {
+        InterceptingOperatorMetricGroup group = new InterceptingOperatorMetricGroup();
+        FlinkSourceReaderMetrics metrics =
+                new FlinkSourceReaderMetrics(InternalSourceReaderMetricGroup.wrap(group));
+        Gauge<?> records = (Gauge<?>) group.get("sourceQueuedRecords");
+        Gauge<?> batches = (Gauge<?>) group.get("sourceQueuedBatches");
+        FlinkSourceReaderMetrics.QueuedBatch first = metrics.registerQueuedBatch(3);
+        FlinkSourceReaderMetrics.QueuedBatch second = metrics.registerQueuedBatch(2);
+        assertThat(records.getValue()).isEqualTo(5L);
+        assertThat(batches.getValue()).isEqualTo(2L);
+
+        first.recordDequeued();
+        assertThat(records.getValue()).isEqualTo(4L);
+        first.close();
+        first.close();
+        first.recordDequeued();
+        assertThat(records.getValue()).isEqualTo(2L);
+        assertThat(batches.getValue()).isEqualTo(1L);
+
+        metrics.close();
+        second.recordDequeued();
+        second.close();
+        metrics.registerQueuedBatch(10).close();
+        assertThat(records.getValue()).isEqualTo(0L);
+        assertThat(batches.getValue()).isEqualTo(0L);
+    }
+
+    @Test
+    void testEmptyQueueBatchDoesNotCountAsQueuedData() {
+        InterceptingOperatorMetricGroup group = new InterceptingOperatorMetricGroup();
+        FlinkSourceReaderMetrics metrics =
+                new FlinkSourceReaderMetrics(InternalSourceReaderMetricGroup.wrap(group));
+        metrics.registerQueuedBatch(0).close();
+        assertThat(((Gauge<?>) group.get("sourceQueuedRecords")).getValue()).isEqualTo(0L);
+        assertThat(((Gauge<?>) group.get("sourceQueuedBatches")).getValue()).isEqualTo(0L);
+    }
 }

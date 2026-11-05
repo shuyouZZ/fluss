@@ -17,8 +17,11 @@
 
 package org.apache.fluss.flink.source.reader;
 
+import org.apache.fluss.flink.source.metrics.FlinkSourceReaderMetrics.QueuedBatch;
 import org.apache.fluss.metadata.TableBucket;
 import org.apache.fluss.utils.CloseableIterator;
+import org.apache.fluss.utils.ExceptionUtils;
+import org.apache.fluss.utils.IOUtils;
 
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 
@@ -30,6 +33,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.fluss.utils.Preconditions.checkNotNull;
 
@@ -38,6 +42,9 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordAndPo
 
     /** The finished splits. */
     private final Set<String> finishedSplits;
+
+    @Nullable private final QueuedBatch queuedBatch;
+    private final AtomicBoolean recycled = new AtomicBoolean();
 
     /** SplitId -> records. */
     private final Map<String, CloseableIterator<RecordAndPos>> splitRecords;
@@ -82,10 +89,21 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordAndPo
             Iterator<String> splitIterator,
             Iterator<TableBucket> tableBucketIterator,
             Set<String> finishedSplits) {
+        this(splitRecords, splitIterator, tableBucketIterator, finishedSplits, null);
+    }
+
+    /** Creates a materialized log handover package with lifecycle accounting. */
+    public FlinkRecordsWithSplitIds(
+            Map<String, CloseableIterator<RecordAndPos>> splitRecords,
+            Iterator<String> splitIterator,
+            Iterator<TableBucket> tableBucketIterator,
+            Set<String> finishedSplits,
+            @Nullable QueuedBatch queuedBatch) {
         this.splitRecords = splitRecords;
         this.splitIterator = splitIterator;
         this.tableBucketIterator = tableBucketIterator;
         this.finishedSplits = finishedSplits;
+        this.queuedBatch = queuedBatch;
     }
 
     public void setTableBucketStoppingOffset(TableBucket tableBucket, long stoppingOffset) {
@@ -122,6 +140,9 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordAndPo
             if (recordAndPos.isSnapshotPhaseFinished()) {
                 return recordAndPos;
             }
+            if (queuedBatch != null) {
+                queuedBatch.recordDequeued();
+            }
             long offset = recordAndPos.record().logOffset();
             // the record current offset is not less than the stopping offset,
             // shouldn't emit it
@@ -136,8 +157,18 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordAndPo
 
     @Override
     public void recycle() {
-        // close records iterator for all splits
-        splitRecords.values().forEach(CloseableIterator::close);
+        if (recycled.compareAndSet(false, true)) {
+            try {
+                // close records iterator for all splits
+                IOUtils.closeAll(splitRecords.values());
+            } catch (Exception e) {
+                ExceptionUtils.rethrow(e);
+            } finally {
+                if (queuedBatch != null) {
+                    queuedBatch.close();
+                }
+            }
+        }
     }
 
     @Override

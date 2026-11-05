@@ -96,6 +96,7 @@ abstract class AbstractLogFetchCollector<T, R> {
                             // preceding this exception.
                             if (fetched.isEmpty() && completedFetch.sizeInBytes == 0) {
                                 logFetchBuffer.poll();
+                                completedFetch.drain();
                             }
                             throw e;
                         }

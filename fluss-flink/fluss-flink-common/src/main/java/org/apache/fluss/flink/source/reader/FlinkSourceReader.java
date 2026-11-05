@@ -64,6 +64,8 @@ public class FlinkSourceReader<OUT>
     /** the tableBuckets ignore to send FinishedKvSnapshotConsumeEvent as it already sending. */
     private final Set<TableBucket> finishedKvSnapshotConsumeBuckets;
 
+    private final FlinkSourceReaderMetrics flinkSourceReaderMetrics;
+
     public FlinkSourceReader(
             FutureCompletingBlockingQueue<RecordsWithSplitIds<RecordAndPos>> elementsQueue,
             Configuration flussConfig,
@@ -93,6 +95,16 @@ public class FlinkSourceReader<OUT>
                 context.getConfiguration(),
                 context);
         this.finishedKvSnapshotConsumeBuckets = new HashSet<>();
+        this.flinkSourceReaderMetrics = flinkSourceReaderMetrics;
+    }
+
+    @Override
+    public void close() throws Exception {
+        try {
+            super.close();
+        } finally {
+            flinkSourceReaderMetrics.close();
+        }
     }
 
     @Override

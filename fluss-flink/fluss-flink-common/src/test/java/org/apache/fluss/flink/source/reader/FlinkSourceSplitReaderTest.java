@@ -272,6 +272,7 @@ class FlinkSourceSplitReaderTest extends FlinkTestBase {
         appendRowsInSeparateBatches(tablePath, recordsPerBucket * DEFAULT_BUCKET_NUM);
 
         Configuration sourceConf = new Configuration(clientConf);
+        sourceConf.setString(ConfigOptions.CLIENT_ID, "source-memory-metrics-test");
         sourceConf.setInt(ConfigOptions.CLIENT_SCANNER_LOG_MAX_POLL_RECORDS, 1);
         sourceConf.setString(
                 ConfigOptions.CLIENT_SCANNER_LOG_FETCH_MAX_BYTES_FOR_BUCKET.key(), "1b");
@@ -291,6 +292,66 @@ class FlinkSourceSplitReaderTest extends FlinkTestBase {
                         sourceReaderMetrics);
         boolean splitReaderClosed = false;
         try {
+            List<String> databaseFirstScope =
+                    Arrays.asList(
+                            "fluss",
+                            "client_scanner",
+                            "client_id",
+                            "source-memory-metrics-test",
+                            "database",
+                            tablePath.getDatabaseName(),
+                            "table",
+                            tablePath.getTableName());
+            List<String> tableFirstScope =
+                    Arrays.asList(
+                            "fluss",
+                            "client_scanner",
+                            "client_id",
+                            "source-memory-metrics-test",
+                            "table",
+                            tablePath.getTableName(),
+                            "database",
+                            tablePath.getDatabaseName());
+            for (String name :
+                    Arrays.asList(
+                            "sourceFetchRetainedEncodedBytes",
+                            "sourceBufferedFetches",
+                            "sourceArrowAllocatedBytes",
+                            "sourceArrowPeakAllocatedBytes")) {
+                List<String> databaseFirst = new ArrayList<>(databaseFirstScope);
+                databaseFirst.add(name);
+                List<String> tableFirst = new ArrayList<>(tableFirstScope);
+                tableFirst.add(name);
+                assertThat(
+                                metricListener
+                                                .getGauge(databaseFirst.toArray(new String[0]))
+                                                .isPresent()
+                                        || metricListener
+                                                .getGauge(tableFirst.toArray(new String[0]))
+                                                .isPresent())
+                        .as("scanner gauge %s", name)
+                        .isTrue();
+            }
+            for (String name :
+                    Arrays.asList(
+                            "sourceFetchReceivedBytesTotal",
+                            "sourceArrowAllocatedBytesTotal",
+                            "sourceArrowReleasedBytesTotal")) {
+                List<String> databaseFirst = new ArrayList<>(databaseFirstScope);
+                databaseFirst.add(name);
+                List<String> tableFirst = new ArrayList<>(tableFirstScope);
+                tableFirst.add(name);
+                assertThat(
+                                metricListener
+                                                .getCounter(databaseFirst.toArray(new String[0]))
+                                                .isPresent()
+                                        || metricListener
+                                                .getCounter(tableFirst.toArray(new String[0]))
+                                                .isPresent())
+                        .as("scanner counter %s", name)
+                        .isTrue();
+            }
+
             // the metric is registered when the split reader creates the log scanner, and reports
             // 0 before anything is fetched
             Optional<Gauge<Long>> pendingRecords =
@@ -316,6 +377,9 @@ class FlinkSourceSplitReaderTest extends FlinkTestBase {
                             < recordsPerBucket
                     || !finishedSplits.contains(boundedSplit.splitId())) {
                 RecordsWithSplitIds<RecordAndPos> records = splitReader.fetch();
+                Gauge<Long> queuedRecords =
+                        metricListener.<Long>getGauge("sourceQueuedRecords").get();
+                long queuedBeforeConsumption = queuedRecords.getValue();
                 int rowsInFetch = 0;
                 String splitId = records.nextSplit();
                 while (splitId != null) {
@@ -327,7 +391,16 @@ class FlinkSourceSplitReaderTest extends FlinkTestBase {
                     splitId = records.nextSplit();
                 }
                 finishedSplits.addAll(records.finishedSplits());
+                assertThat(queuedBeforeConsumption).isGreaterThanOrEqualTo(rowsInFetch);
                 records.recycle();
+                assertThat((long) queuedRecords.getValue()).isZero();
+                assertThat(
+                                (long)
+                                        metricListener
+                                                .<Long>getGauge("sourceQueuedBatches")
+                                                .get()
+                                                .getValue())
+                        .isZero();
 
                 if (rowsInFetch > 0) {
                     int firstStreamingFetched =

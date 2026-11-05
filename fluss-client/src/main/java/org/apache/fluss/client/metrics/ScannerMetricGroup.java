@@ -31,8 +31,10 @@ import org.apache.fluss.metrics.MetricNames;
 import org.apache.fluss.metrics.ThreadSafeSimpleCounter;
 import org.apache.fluss.metrics.groups.AbstractMetricGroup;
 import org.apache.fluss.rpc.metrics.ClientMetricGroup;
+import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.AllocationListener;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.fluss.metrics.utils.MetricGroupUtils.makeScope;
 
@@ -47,6 +49,27 @@ public class ScannerMetricGroup extends AbstractMetricGroup {
 
     private final Counter fetchRequestCount;
     private final Histogram bytesPerRequest;
+
+    private final AtomicLong sourceArrowAllocatedBytes = new AtomicLong();
+    private final AtomicLong sourceArrowPeakAllocatedBytes = new AtomicLong();
+    private final Counter sourceArrowAllocatedBytesTotal = new ThreadSafeSimpleCounter();
+    private final Counter sourceArrowReleasedBytesTotal = new ThreadSafeSimpleCounter();
+
+    private final AllocationListener sourceArrowAllocationListener =
+            new AllocationListener() {
+                @Override
+                public void onAllocation(long size) {
+                    long allocated = sourceArrowAllocatedBytes.addAndGet(size);
+                    sourceArrowPeakAllocatedBytes.accumulateAndGet(allocated, Math::max);
+                    sourceArrowAllocatedBytesTotal.inc(size);
+                }
+
+                @Override
+                public void onRelease(long size) {
+                    sourceArrowAllocatedBytes.addAndGet(-size);
+                    sourceArrowReleasedBytesTotal.inc(size);
+                }
+            };
 
     // remote log
     private final Counter remoteFetchBytes;
@@ -82,6 +105,29 @@ public class ScannerMetricGroup extends AbstractMetricGroup {
         gauge(MetricNames.SCANNER_LAST_POLL_SECONDS_AGO, this::lastPollSecondsAgo);
         gauge(MetricNames.SCANNER_FETCH_LATENCY_MS, () -> fetchLatencyInMs);
         gauge(MetricNames.SCANNER_POLL_IDLE_RATIO, () -> pollIdleRatio);
+        gauge(MetricNames.SCANNER_SOURCE_ARROW_ALLOCATED_BYTES, sourceArrowAllocatedBytes::get);
+        gauge(
+                MetricNames.SCANNER_SOURCE_ARROW_PEAK_ALLOCATED_BYTES,
+                sourceArrowPeakAllocatedBytes::get);
+        counter(
+                MetricNames.SCANNER_SOURCE_ARROW_ALLOCATED_BYTES_TOTAL,
+                sourceArrowAllocatedBytesTotal);
+        counter(
+                MetricNames.SCANNER_SOURCE_ARROW_RELEASED_BYTES_TOTAL,
+                sourceArrowReleasedBytesTotal);
+    }
+
+    /** Registers retained local Fetch payload metrics, whose lifetime ends on drain, not poll. */
+    public void registerSourceFetchMetrics(
+            Counter receivedBytes, Gauge<Long> retainedBytes, Gauge<Integer> bufferedFetches) {
+        counter(MetricNames.SCANNER_SOURCE_FETCH_RECEIVED_BYTES_TOTAL, receivedBytes);
+        gauge(MetricNames.SCANNER_SOURCE_FETCH_RETAINED_ENCODED_BYTES, retainedBytes);
+        gauge(MetricNames.SCANNER_SOURCE_BUFFERED_FETCHES, bufferedFetches);
+    }
+
+    /** Returns the shared listener for all local/remote Arrow read contexts of this scanner. */
+    public AllocationListener sourceArrowAllocationListener() {
+        return sourceArrowAllocationListener;
     }
 
     public Counter fetchRequestCount() {

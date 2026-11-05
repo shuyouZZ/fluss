@@ -23,6 +23,7 @@ import org.apache.fluss.client.table.scanner.ScanRecord;
 import org.apache.fluss.compression.ArrowCompressionInfo;
 import org.apache.fluss.config.ConfigOptions;
 import org.apache.fluss.config.Configuration;
+import org.apache.fluss.exception.FetchException;
 import org.apache.fluss.metadata.LogFormat;
 import org.apache.fluss.metadata.TableBucket;
 import org.apache.fluss.record.ChangeType;
@@ -30,6 +31,8 @@ import org.apache.fluss.record.LogRecordBatch;
 import org.apache.fluss.record.LogRecordReadContext;
 import org.apache.fluss.record.MemoryLogRecords;
 import org.apache.fluss.rpc.entity.FetchLogResultForBucket;
+import org.apache.fluss.rpc.protocol.ApiError;
+import org.apache.fluss.rpc.protocol.Errors;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,6 +54,7 @@ import static org.apache.fluss.record.TestData.TEST_SCHEMA_GETTER;
 import static org.apache.fluss.testutils.DataTestUtils.createBasicMemoryLogRecords;
 import static org.apache.fluss.testutils.DataTestUtils.genMemoryLogRecordsByObject;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link LogFetchCollector}. */
 public class LogFetchCollectorTest {
@@ -84,6 +88,25 @@ public class LogFetchCollectorTest {
             readContext.close();
             readContext = null;
         }
+    }
+
+    @Test
+    void testEmptyErrorFetchDoesNotRemainRetained() {
+        TableBucket bucket = new TableBucket(DATA1_TABLE_ID, 0);
+        CompletedFetch failed =
+                makeCompletedFetch(
+                        bucket,
+                        FetchLogResultForBucket.error(
+                                bucket, new ApiError(Errors.CORRUPT_MESSAGE, "test failure")),
+                        0L);
+        logFetchBuffer.add(failed);
+        assertThat(logFetchBuffer.getBufferedFetches()).isEqualTo(1);
+        assertThatThrownBy(() -> logFetchCollector.collectFetch(logFetchBuffer))
+                .isInstanceOf(FetchException.class);
+        assertThat(logFetchBuffer.isEmpty()).isTrue();
+        assertThat(logFetchBuffer.getBufferedFetches()).isZero();
+        assertThat(logFetchBuffer.getRetainedEncodedBytes()).isZero();
+        assertThat(failed.isConsumed()).isTrue();
     }
 
     @Test

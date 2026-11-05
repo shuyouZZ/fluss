@@ -20,6 +20,9 @@ package org.apache.fluss.client.table.scanner.log;
 import org.apache.fluss.annotation.Internal;
 import org.apache.fluss.exception.WakeupException;
 import org.apache.fluss.metadata.TableBucket;
+import org.apache.fluss.metrics.Counter;
+import org.apache.fluss.metrics.ThreadSafeSimpleCounter;
+import org.apache.fluss.utils.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,11 +31,13 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -73,8 +78,53 @@ public class LogFetchBuffer implements AutoCloseable {
     @GuardedBy("lock")
     private @Nullable CompletedFetch nextInLineFetch;
 
+    @GuardedBy("lock")
+    private final Map<CompletedFetch, Long> retainedFetches = new IdentityHashMap<>();
+
+    @GuardedBy("lock")
+    private long retainedEncodedBytes;
+
+    @GuardedBy("lock")
+    private boolean closed;
+
+    private final Counter receivedBytes = new ThreadSafeSimpleCounter();
+
     public LogFetchBuffer() {
         this.completedFetches = new LinkedList<>();
+    }
+
+    long getRetainedEncodedBytes() {
+        return inLock(lock, () -> retainedEncodedBytes);
+    }
+
+    int getBufferedFetches() {
+        return inLock(lock, retainedFetches::size);
+    }
+
+    Counter receivedBytes() {
+        return receivedBytes;
+    }
+
+    private void track(CompletedFetch fetch) {
+        if (fetch.isConsumed() || retainedFetches.containsKey(fetch)) {
+            return;
+        }
+        // Remote segments are file-backed: their length is not resident Fetch payload memory.
+        long encodedBytes =
+                fetch instanceof DefaultCompletedFetch ? Math.max(0, fetch.sizeInBytes) : 0L;
+        retainedFetches.put(fetch, encodedBytes);
+        retainedEncodedBytes += encodedBytes;
+        receivedBytes.inc(encodedBytes);
+        fetch.whenDrained(
+                () ->
+                        inLock(
+                                lock,
+                                () -> {
+                                    Long retained = retainedFetches.remove(fetch);
+                                    if (retained != null) {
+                                        retainedEncodedBytes -= retained;
+                                    }
+                                }));
     }
 
     /**
@@ -90,6 +140,10 @@ public class LogFetchBuffer implements AutoCloseable {
         inLock(
                 lock,
                 () -> {
+                    if (closed) {
+                        pendingFetch.discard();
+                        return;
+                    }
                     pendingFetches
                             .computeIfAbsent(pendingFetch.tableBucket(), k -> new LinkedList<>())
                             .add(pendingFetch);
@@ -110,6 +164,7 @@ public class LogFetchBuffer implements AutoCloseable {
                         PendingFetch pendingFetch = pendings.peek();
                         if (pendingFetch.isCompleted()) {
                             CompletedFetch completedFetch = pendingFetch.toCompletedFetch();
+                            track(completedFetch);
                             completedFetches.add(completedFetch);
                             pendings.poll();
                             hasCompleted = true;
@@ -131,6 +186,11 @@ public class LogFetchBuffer implements AutoCloseable {
         inLock(
                 lock,
                 () -> {
+                    if (closed) {
+                        completedFetch.drain();
+                        return;
+                    }
+                    track(completedFetch);
                     LinkedList<PendingFetch> pendings =
                             pendingFetches.get(completedFetch.tableBucket);
                     if (pendings == null || pendings.isEmpty()) {
@@ -154,7 +214,18 @@ public class LogFetchBuffer implements AutoCloseable {
     }
 
     void setNextInLineFetch(@Nullable CompletedFetch nextInLineFetch) {
-        inLock(lock, () -> this.nextInLineFetch = nextInLineFetch);
+        inLock(
+                lock,
+                () -> {
+                    if (nextInLineFetch != null) {
+                        if (closed) {
+                            nextInLineFetch.drain();
+                            return;
+                        }
+                        track(nextInLineFetch);
+                    }
+                    this.nextInLineFetch = nextInLineFetch;
+                });
     }
 
     CompletedFetch peek() {
@@ -237,6 +308,9 @@ public class LogFetchBuffer implements AutoCloseable {
                                         }
                                         return false;
                                     });
+                    // A polled fetch can still own buffers until consumption/drain completes.
+                    new ArrayList<>(retainedFetches.keySet())
+                            .forEach(fetch -> maybeDrain(buckets, fetch));
                 });
     }
 
@@ -284,6 +358,33 @@ public class LogFetchBuffer implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        inLock(lock, () -> retainAll(Collections.emptySet()));
+        lock.lock();
+        try {
+            closed = true;
+            List<AutoCloseable> resources = new ArrayList<>();
+            pendingFetches
+                    .values()
+                    .forEach(fetches -> fetches.forEach(fetch -> resources.add(fetch::discard)));
+            new ArrayList<>(retainedFetches.keySet())
+                    .forEach(
+                            fetch ->
+                                    resources.add(
+                                            () -> {
+                                                if (!fetch.isConsumed()) {
+                                                    fetch.drain();
+                                                }
+                                            }));
+            try {
+                IOUtils.closeAll(resources);
+            } finally {
+                completedFetches.clear();
+                pendingFetches.clear();
+                nextInLineFetch = null;
+                retainedFetches.clear();
+                retainedEncodedBytes = 0;
+            }
+        } finally {
+            lock.unlock();
+        }
     }
 }

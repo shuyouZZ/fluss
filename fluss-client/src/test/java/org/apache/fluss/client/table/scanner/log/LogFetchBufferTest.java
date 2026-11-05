@@ -46,6 +46,7 @@ import static org.apache.fluss.record.TestData.DEFAULT_SCHEMA_ID;
 import static org.apache.fluss.record.TestData.TEST_SCHEMA_GETTER;
 import static org.apache.fluss.testutils.DataTestUtils.genMemoryLogRecordsByObject;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link LogFetchBuffer}. */
 public class LogFetchBufferTest {
@@ -74,6 +75,97 @@ public class LogFetchBufferTest {
         if (readContext != null) {
             readContext.close();
             readContext = null;
+        }
+    }
+
+    @Test
+    void testRetainedMetricsFollowDrainRatherThanQueueRemoval() throws Exception {
+        try (LogFetchBuffer buffer = new LogFetchBuffer()) {
+            CompletedFetch fetch = makeCompletedFetch(tableBucket1);
+            buffer.add(fetch);
+            buffer.add(fetch);
+            assertThat(buffer.getBufferedFetches()).isEqualTo(1);
+            assertThat(buffer.getRetainedEncodedBytes()).isEqualTo(fetch.sizeInBytes);
+            assertThat(buffer.receivedBytes().getCount()).isEqualTo(fetch.sizeInBytes);
+
+            buffer.poll();
+            assertThat(buffer.getRetainedEncodedBytes()).isEqualTo(fetch.sizeInBytes);
+            fetch.drain();
+            fetch.drain();
+            assertThat(buffer.getBufferedFetches()).isZero();
+            assertThat(buffer.getRetainedEncodedBytes()).isZero();
+            assertThat(buffer.receivedBytes().getCount()).isEqualTo(fetch.sizeInBytes);
+        }
+    }
+
+    @Test
+    void testCloseReleasesPolledFetchAndRejectsLateData() throws Exception {
+        LogFetchBuffer buffer = new LogFetchBuffer();
+        CompletedFetch fetch = makeCompletedFetch(tableBucket1);
+        buffer.add(fetch);
+        buffer.poll();
+        buffer.close();
+        buffer.close();
+        assertThat(fetch.isConsumed()).isTrue();
+        assertThat(buffer.getBufferedFetches()).isZero();
+        assertThat(buffer.getRetainedEncodedBytes()).isZero();
+
+        CompletedFetch late = makeCompletedFetch(tableBucket2);
+        buffer.add(late);
+        assertThat(late.isConsumed()).isTrue();
+        assertThat(buffer.getBufferedFetches()).isZero();
+        assertThat(buffer.receivedBytes().getCount()).isEqualTo(fetch.sizeInBytes);
+    }
+
+    @Test
+    void testCloseContinuesWhenPendingFetchDiscardFails() throws Exception {
+        LogFetchBuffer buffer = new LogFetchBuffer();
+        buffer.pend(
+                new PendingFetch() {
+                    @Override
+                    public TableBucket tableBucket() {
+                        return tableBucket1;
+                    }
+
+                    @Override
+                    public boolean isCompleted() {
+                        return false;
+                    }
+
+                    @Override
+                    public CompletedFetch toCompletedFetch() {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public void discard() {
+                        throw new IllegalStateException("discard failed");
+                    }
+                });
+        CompletedFetch completed = makeCompletedFetch(tableBucket2);
+        buffer.add(completed);
+        assertThatThrownBy(buffer::close).isInstanceOf(IllegalStateException.class);
+        assertThat(completed.isConsumed()).isTrue();
+        assertThat(buffer.getBufferedFetches()).isZero();
+        assertThat(buffer.getRetainedEncodedBytes()).isZero();
+        buffer.close();
+    }
+
+    @Test
+    void testCompletedFetchWaitingBehindPendingIsCountedOnce() throws Exception {
+        try (LogFetchBuffer buffer = new LogFetchBuffer()) {
+            AtomicBoolean ready = new AtomicBoolean();
+            buffer.pend(makePendingFetch(tableBucket1, ready));
+            CompletedFetch local = makeCompletedFetch(tableBucket1);
+            buffer.add(local);
+            assertThat(buffer.isEmpty()).isTrue();
+            assertThat(buffer.getBufferedFetches()).isEqualTo(1);
+            assertThat(buffer.getRetainedEncodedBytes()).isEqualTo(local.sizeInBytes);
+            buffer.retainAll(Collections.emptySet());
+            assertThat(local.isConsumed()).isTrue();
+            assertThat(buffer.getBufferedFetches()).isZero();
+            assertThat(buffer.getRetainedEncodedBytes()).isZero();
+            assertThat(buffer.receivedBytes().getCount()).isEqualTo(local.sizeInBytes);
         }
     }
 

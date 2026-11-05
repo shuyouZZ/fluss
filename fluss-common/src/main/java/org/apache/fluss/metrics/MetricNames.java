@@ -338,6 +338,18 @@ public class MetricNames {
     public static final String WRITER_SEND_LATENCY_MS = "sendLatencyMs";
 
     // for scanner
+    public static final String SCANNER_SOURCE_FETCH_RECEIVED_BYTES_TOTAL =
+            "sourceFetchReceivedBytesTotal";
+    public static final String SCANNER_SOURCE_FETCH_RETAINED_ENCODED_BYTES =
+            "sourceFetchRetainedEncodedBytes";
+    public static final String SCANNER_SOURCE_BUFFERED_FETCHES = "sourceBufferedFetches";
+    public static final String SCANNER_SOURCE_ARROW_ALLOCATED_BYTES = "sourceArrowAllocatedBytes";
+    public static final String SCANNER_SOURCE_ARROW_PEAK_ALLOCATED_BYTES =
+            "sourceArrowPeakAllocatedBytes";
+    public static final String SCANNER_SOURCE_ARROW_ALLOCATED_BYTES_TOTAL =
+            "sourceArrowAllocatedBytesTotal";
+    public static final String SCANNER_SOURCE_ARROW_RELEASED_BYTES_TOTAL =
+            "sourceArrowReleasedBytesTotal";
     public static final String SCANNER_TIME_MS_BETWEEN_POLL = "timeMsBetweenPoll";
     public static final String SCANNER_LAST_POLL_SECONDS_AGO = "lastPollSecondsAgo";
     public static final String SCANNER_POLL_IDLE_RATIO = "pollIdleRatio";

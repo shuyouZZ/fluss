@@ -45,6 +45,27 @@ public final class UnshadedArrowReadUtils {
     private UnshadedArrowReadUtils() {}
 
     /**
+     * Creates an allocator only when entering the optional unshaded Arrow API. The opaque return
+     * type keeps ordinary row readers independent of unshaded Arrow classes during verification.
+     */
+    public static AutoCloseable createBufferAllocator(
+            org.apache.fluss.shaded.arrow.org.apache.arrow.memory.AllocationListener delegate) {
+        org.apache.arrow.memory.AllocationListener listener =
+                new org.apache.arrow.memory.AllocationListener() {
+                    @Override
+                    public void onAllocation(long size) {
+                        delegate.onAllocation(size);
+                    }
+
+                    @Override
+                    public void onRelease(long size) {
+                        delegate.onRelease(size);
+                    }
+                };
+        return new org.apache.arrow.memory.RootAllocator(listener, Long.MAX_VALUE);
+    }
+
+    /**
      * Converts a Fluss RowType to an unshaded Arrow Schema.
      *
      * <p>Converts via FlatBuffer binary serialization: shaded Schema → bytes → unshaded Schema.

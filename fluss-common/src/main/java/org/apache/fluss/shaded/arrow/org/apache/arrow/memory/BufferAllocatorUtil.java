@@ -29,9 +29,16 @@ public class BufferAllocatorUtil {
     /** Creates a {@link BufferAllocator} configured with the {@link ArrowRoundingPolicy}. */
     public static BufferAllocator createBufferAllocator(
             @Nullable AllocationManager.Factory allocationManagerFactory) {
+        return createBufferAllocator(allocationManagerFactory, AllocationListener.NOOP);
+    }
+
+    /** Creates an allocator that reports successful allocations and releases to the listener. */
+    public static BufferAllocator createBufferAllocator(
+            @Nullable AllocationManager.Factory allocationManagerFactory,
+            AllocationListener allocationListener) {
         ImmutableConfig.Builder builder =
                 ImmutableConfig.builder()
-                        .listener(AllocationListener.NOOP)
+                        .listener(allocationListener)
                         .maxAllocation(Long.MAX_VALUE)
                         .roundingPolicy(ARROW_ROUNDING_POLICY);
         if (allocationManagerFactory != null) {

@@ -483,6 +483,7 @@ public class FlinkSourceSplitReader implements SplitReader<RecordAndPos, SourceS
         Set<String> finishedSplits = new HashSet<>();
         Map<TableBucket, String> splitIdByTableBucket = new HashMap<>();
         List<TableBucket> tableScanBuckets = new ArrayList<>(scanRecords.buckets().size());
+        long queuedRecords = 0L;
         for (TableBucket scanBucket : scanRecords.buckets()) {
             long stoppingOffset = getStoppingOffset(scanBucket);
             String splitId = subscribedBuckets.get(scanBucket);
@@ -493,6 +494,7 @@ public class FlinkSourceSplitReader implements SplitReader<RecordAndPos, SourceS
             splitIdByTableBucket.put(scanBucket, splitId);
             tableScanBuckets.add(scanBucket);
             List<ScanRecord> bucketScanRecords = scanRecords.records(scanBucket);
+            queuedRecords += bucketScanRecords.size();
             Long consumedUpToOffset = scanRecords.consumedUpToOffset(scanBucket);
             if (consumedUpToOffset != null && consumedUpToOffset >= stoppingOffset) {
                 stoppingOffsets.put(scanBucket, stoppingOffset);
@@ -539,7 +541,11 @@ public class FlinkSourceSplitReader implements SplitReader<RecordAndPos, SourceS
 
         FlinkRecordsWithSplitIds recordsWithSplitIds =
                 new FlinkRecordsWithSplitIds(
-                        splitRecords, splitIterator, tableScanBuckets.iterator(), finishedSplits);
+                        splitRecords,
+                        splitIterator,
+                        tableScanBuckets.iterator(),
+                        finishedSplits,
+                        flinkSourceReaderMetrics.registerQueuedBatch(queuedRecords));
         stoppingOffsets.forEach(recordsWithSplitIds::setTableBucketStoppingOffset);
         return recordsWithSplitIds;
     }

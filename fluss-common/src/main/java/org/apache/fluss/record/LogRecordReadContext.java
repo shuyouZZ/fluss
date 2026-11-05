@@ -26,6 +26,7 @@ import org.apache.fluss.metadata.TableInfo;
 import org.apache.fluss.row.InternalRow;
 import org.apache.fluss.row.InternalRow.FieldGetter;
 import org.apache.fluss.row.ProjectedRow;
+import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.AllocationListener;
 import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.AllocationManager;
 import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.BufferAllocator;
 import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.BufferAllocatorUtil;
@@ -82,6 +83,7 @@ public class LogRecordReadContext
     @Nullable private final ReadTarget target;
 
     @Nullable private final BufferAllocator bufferAllocator;
+    private final AllocationListener allocationListener;
     // the unshaded Arrow memory buffer allocator, declared as AutoCloseable to avoid
     // importing unshaded Arrow classes in this module (they are provided-scope)
     @Nullable private volatile AutoCloseable unshadedBufferAllocator;
@@ -118,6 +120,25 @@ public class LogRecordReadContext
             @Nullable Projection projection,
             SchemaGetter schemaGetter,
             AllocationManager.Factory allocationManagerFactory) {
+        return createReadContext(
+                tableInfo,
+                readFromRemote,
+                schemaResolution,
+                projection,
+                schemaGetter,
+                allocationManagerFactory,
+                AllocationListener.NOOP);
+    }
+
+    /** Creates a read context with a listener for its Arrow allocator's memory accounting. */
+    public static LogRecordReadContext createReadContext(
+            TableInfo tableInfo,
+            boolean readFromRemote,
+            SchemaResolution schemaResolution,
+            @Nullable Projection projection,
+            SchemaGetter schemaGetter,
+            AllocationManager.Factory allocationManagerFactory,
+            AllocationListener allocationListener) {
         checkNotNull(schemaResolution, "schemaResolution");
         boolean readAsTargetSchema = schemaResolution == SchemaResolution.TARGET;
         RowType rowType = tableInfo.getRowType();
@@ -154,7 +175,8 @@ public class LogRecordReadContext
                     target,
                     projectionPushDowned,
                     schemaGetter,
-                    allocationManagerFactory);
+                    allocationManagerFactory,
+                    allocationListener);
         } else if (logFormat == LogFormat.INDEXED) {
             return createIndexedReadContext(tableInfo.getTableId(), target, schemaGetter);
         } else if (logFormat == LogFormat.COMPACTED) {
@@ -174,11 +196,34 @@ public class LogRecordReadContext
             boolean projectionPushDowned,
             SchemaGetter schemaGetter,
             AllocationManager.Factory allocationManagerFactory) {
+        return createArrowReadContext(
+                tableId,
+                target,
+                projectionPushDowned,
+                schemaGetter,
+                allocationManagerFactory,
+                AllocationListener.NOOP);
+    }
+
+    private static LogRecordReadContext createArrowReadContext(
+            long tableId,
+            @Nullable ReadTarget target,
+            boolean projectionPushDowned,
+            SchemaGetter schemaGetter,
+            AllocationManager.Factory allocationManagerFactory,
+            AllocationListener allocationListener) {
         // TODO: use a more reasonable memory limit
         BufferAllocator allocator =
-                BufferAllocatorUtil.createBufferAllocator(allocationManagerFactory);
+                BufferAllocatorUtil.createBufferAllocator(
+                        allocationManagerFactory, allocationListener);
         return new LogRecordReadContext(
-                tableId, LogFormat.ARROW, target, allocator, projectionPushDowned, schemaGetter);
+                tableId,
+                LogFormat.ARROW,
+                target,
+                allocator,
+                projectionPushDowned,
+                schemaGetter,
+                allocationListener);
     }
 
     private static LogRecordReadContext createIndexedReadContext(
@@ -264,12 +309,31 @@ public class LogRecordReadContext
             @Nullable BufferAllocator bufferAllocator,
             boolean projectionPushDowned,
             SchemaGetter schemaGetter) {
+        this(
+                tableId,
+                logFormat,
+                target,
+                bufferAllocator,
+                projectionPushDowned,
+                schemaGetter,
+                AllocationListener.NOOP);
+    }
+
+    private LogRecordReadContext(
+            long tableId,
+            LogFormat logFormat,
+            @Nullable ReadTarget target,
+            @Nullable BufferAllocator bufferAllocator,
+            boolean projectionPushDowned,
+            SchemaGetter schemaGetter,
+            AllocationListener allocationListener) {
         this.tableId = tableId;
         this.logFormat = logFormat;
         this.target = target;
         this.bufferAllocator = bufferAllocator;
         this.projectionPushDowned = projectionPushDowned;
         this.schemaGetter = schemaGetter;
+        this.allocationListener = allocationListener;
     }
 
     // -------------------------------------------------------------------------
@@ -413,7 +477,8 @@ public class LogRecordReadContext
 
         synchronized (unshadedArrowResourceLock) {
             if (unshadedBufferAllocator == null) {
-                unshadedBufferAllocator = new org.apache.arrow.memory.RootAllocator(Long.MAX_VALUE);
+                unshadedBufferAllocator =
+                        UnshadedArrowReadUtils.createBufferAllocator(allocationListener);
             }
             return unshadedBufferAllocator;
         }

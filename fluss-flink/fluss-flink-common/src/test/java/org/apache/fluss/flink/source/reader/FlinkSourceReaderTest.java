@@ -87,6 +87,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FlinkSourceReaderTest extends FlinkTestBase {
 
     @Test
+    void testCloseClearsQueuedLogRecords() throws Exception {
+        MetricListener listener = new MetricListener();
+        TestingReaderContext context =
+                new TestingReaderContext(
+                        new org.apache.flink.configuration.Configuration(),
+                        InternalSourceReaderMetricGroup.mock(listener.getMetricGroup()));
+        FlinkSourceReaderMetrics metrics = new FlinkSourceReaderMetrics(context.metricGroup());
+        FlinkSourceReaderMetrics.QueuedBatch batch = metrics.registerQueuedBatch(7);
+        try (TestingFlinkSourceReader<RowData> reader =
+                createReader(
+                        clientConf,
+                        TablePath.of(DEFAULT_DB, "test_queue_close"),
+                        DEFAULT_PK_TABLE_SCHEMA.getRowType(),
+                        context,
+                        null,
+                        metrics)) {
+            assertThat((long) listener.<Long>getGauge("sourceQueuedRecords").get().getValue())
+                    .isEqualTo(7L);
+        }
+        batch.recordDequeued();
+        batch.close();
+        assertThat((long) listener.<Long>getGauge("sourceQueuedRecords").get().getValue()).isZero();
+        assertThat((long) listener.<Long>getGauge("sourceQueuedBatches").get().getValue()).isZero();
+    }
+
+    @Test
     void testCheckpointHybridSnapshotFinishedBeforeFirstLogRecord() throws Exception {
         TablePath tablePath = TablePath.of(DEFAULT_DB, "test_checkpoint_hybrid_snapshot_finished");
         TableDescriptor tableDescriptor =

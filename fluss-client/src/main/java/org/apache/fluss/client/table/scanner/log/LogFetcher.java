@@ -56,6 +56,7 @@ import org.apache.fluss.rpc.protocol.ApiError;
 import org.apache.fluss.rpc.protocol.Errors;
 import org.apache.fluss.rpc.protocol.FetchLogReadPreference;
 import org.apache.fluss.rpc.util.PredicateMessageUtils;
+import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.AllocationListener;
 import org.apache.fluss.shaded.arrow.org.apache.arrow.memory.ChunkedAllocationManager;
 import org.apache.fluss.shaded.netty4.io.netty.buffer.ByteBuf;
 import org.apache.fluss.utils.IOUtils;
@@ -148,6 +149,10 @@ public class LogFetcher implements Closeable {
         this.arrowLogFetchCollector =
                 new ArrowLogFetchCollector(logScannerStatus, conf, metadataUpdater);
         this.scannerMetricGroup = scannerMetricGroup;
+        scannerMetricGroup.registerSourceFetchMetrics(
+                logFetchBuffer.receivedBytes(),
+                logFetchBuffer::getRetainedEncodedBytes,
+                logFetchBuffer::getBufferedFetches);
         this.readPreference = conf.get(ConfigOptions.CLIENT_SCANNER_LOG_READ_PREFERENCE);
         this.remoteLogDownloader =
                 new RemoteLogDownloader(
@@ -173,7 +178,8 @@ public class LogFetcher implements Closeable {
                             spec.getProjection(),
                             spec.getFilter(),
                             schemaGetter,
-                            chunkedFactory);
+                            chunkedFactory,
+                            scannerMetricGroup.sourceArrowAllocationListener());
             tableReadContexts.put(tableId, tableReadContext);
         }
     }
@@ -756,6 +762,24 @@ public class LogFetcher implements Closeable {
                 @Nullable Predicate recordBatchFilter,
                 SchemaGetter schemaGetter,
                 ChunkedAllocationManager.ChunkedFactory chunkedFactory) {
+            this(
+                    tableInfo,
+                    schemaResolution,
+                    projection,
+                    recordBatchFilter,
+                    schemaGetter,
+                    chunkedFactory,
+                    AllocationListener.NOOP);
+        }
+
+        TableReadContext(
+                TableInfo tableInfo,
+                LogRecordReadContext.SchemaResolution schemaResolution,
+                @Nullable Projection projection,
+                @Nullable Predicate recordBatchFilter,
+                SchemaGetter schemaGetter,
+                ChunkedAllocationManager.ChunkedFactory chunkedFactory,
+                AllocationListener allocationListener) {
             this.tablePath = tableInfo.getTablePath();
             this.isPartitioned = tableInfo.isPartitioned();
             // Share the LogFetcher-owned chunked factory so all tables reuse one chunk
@@ -767,7 +791,8 @@ public class LogFetcher implements Closeable {
                             schemaResolution,
                             projection,
                             schemaGetter,
-                            chunkedFactory);
+                            chunkedFactory,
+                            allocationListener);
             this.remoteReadContext =
                     LogRecordReadContext.createReadContext(
                             tableInfo,
@@ -775,7 +800,8 @@ public class LogFetcher implements Closeable {
                             schemaResolution,
                             projection,
                             schemaGetter,
-                            chunkedFactory);
+                            chunkedFactory,
+                            allocationListener);
             this.projection = projection;
             this.cachedPbPredicate =
                     recordBatchFilter != null

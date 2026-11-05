@@ -38,6 +38,8 @@ import org.apache.fluss.utils.CloseableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,7 +79,8 @@ public abstract class CompletedFetch {
     private Exception cachedRecordException = null;
     private boolean corruptLastRecord = false;
     private long nextFetchOffset;
-    private boolean isConsumed = false;
+    private volatile boolean isConsumed = false;
+    @Nullable private volatile Runnable drainCallback;
     private boolean initialized = false;
 
     public CompletedFetch(
@@ -181,6 +184,22 @@ public abstract class CompletedFetch {
         this.initialized = true;
     }
 
+    /** Registers the buffer owner's release notification, including already-drained fetches. */
+    void whenDrained(Runnable callback) {
+        this.drainCallback = callback;
+        if (isConsumed) {
+            notifyDrained();
+        }
+    }
+
+    private void notifyDrained() {
+        Runnable callback = drainCallback;
+        drainCallback = null;
+        if (callback != null) {
+            callback.run();
+        }
+    }
+
     /**
      * Draining a {@link CompletedFetch} will signal that the data has been consumed and the
      * underlying resources are closed. This is somewhat analogous to {@link Closeable#close()
@@ -188,15 +207,19 @@ public abstract class CompletedFetch {
      * empty {@link List list} will be returned instead.
      */
     void drain() {
-        if (!isConsumed) {
-            maybeCloseRecordStream();
-            cachedRecordException = null;
-            isConsumed = true;
+        try {
+            if (!isConsumed) {
+                maybeCloseRecordStream();
+                cachedRecordException = null;
+                isConsumed = true;
 
-            // we move the bucket to the end if we received some bytes.
-            if (recordsRead > 0) {
-                logScannerStatus.moveBucketToEnd(tableBucket);
+                // we move the bucket to the end if we received some bytes.
+                if (recordsRead > 0) {
+                    logScannerStatus.moveBucketToEnd(tableBucket);
+                }
             }
+        } finally {
+            notifyDrained();
         }
     }
 
