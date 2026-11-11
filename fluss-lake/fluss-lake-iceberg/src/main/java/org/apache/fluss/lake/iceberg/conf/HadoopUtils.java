@@ -46,6 +46,7 @@ public class HadoopUtils {
         // from the classpath
 
         Configuration result = new HdfsConfiguration();
+        IcebergRegionConfig.load(result);
         boolean foundHadoopConfiguration = false;
 
         // We need to load both core-site.xml and hdfs-site.xml to determine the default fs path and
@@ -88,11 +89,7 @@ public class HadoopUtils {
                             flussConfiguration.getString(
                                     ConfigBuilder.key(key).stringType().noDefaultValue(), null);
                     result.set(newKey, value);
-                    LOG.debug(
-                            "Adding Fluss config entry for {} as {}={} to Hadoop config",
-                            key,
-                            newKey,
-                            value);
+                    LOG.debug("Adding Fluss config entry for {} to Hadoop config", newKey);
                     foundHadoopConfiguration = true;
                 }
             }
