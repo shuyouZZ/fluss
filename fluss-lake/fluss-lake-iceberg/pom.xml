@@ -37,45 +37,7 @@
             <id>internal-flink118-iceberg16</id>
             <properties>
                 <internal.compatibility.gate.skip>false</internal.compatibility.gate.skip>
-                <iceberg.flink.region-config.version>dream-1.6.1-142</iceberg.flink.region-config.version>
             </properties>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-dependency-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>unpack-internal-iceberg-region-config</id>
-                                <phase>prepare-package</phase>
-                                <goals>
-                                    <goal>unpack</goal>
-                                </goals>
-                                <configuration>
-                                    <overWriteReleases>true</overWriteReleases>
-                                    <overWriteSnapshots>true</overWriteSnapshots>
-                                    <artifactItems>
-                                        <!-- Native catalogs use the same bundled configuration as Iceberg SQL. -->
-                                        <artifactItem>
-                                            <groupId>org.apache.iceberg</groupId>
-                                            <artifactId>iceberg-flink-runtime-1.18</artifactId>
-                                            <version>${iceberg.flink.region-config.version}</version>
-                                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
-                                            <includes>
-                                                conf/cn/hive-site.xml,
-                                                conf/cn/config.properties,
-                                                conf/us/hive-site.xml,
-                                                conf/us/config.properties,
-                                                org/apache/iceberg/flink/util/CredentialCryptoUtil*.class
-                                            </includes>
-                                        </artifactItem>
-                                    </artifactItems>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
         </profile>
     </profiles>
 
